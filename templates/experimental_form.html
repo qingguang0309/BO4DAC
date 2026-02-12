@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Experimental Data Input Form</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            padding: 20px;
+        }
+        .form-container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        .section-title {
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        .btn-submit {
+            background-color: #27ae60;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.1em;
+        }
+        .btn-submit:hover {
+            background-color: #219653;
+        }
+        .form-label.required::after {
+            content: " *";
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="text-center mb-4">
+            <h1 class="text-primary">Experimental Data Input Form</h1>
+            <p class="lead">Enter your experimental results to improve the optimization model</p>
+        </div>
+
+        <div class="form-container">
+            <form id="experimentalForm">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h3 class="section-title">Material Properties</h3>
+                        
+                        <div class="mb-3">
+                            <label for="support" class="form-label required">Support Material</label>
+                            <select class="form-select" id="support" required>
+                                <option value="">Select Support Material</option>
+                                <option value="SBA-15">SBA-15</option>
+                                <option value="NS">NS</option>
+                                <option value="MCM-41">MCM-41</option>
+                                <option value="MCM-48">MCM-48</option>
+                                <option value="Mesoporous γ-Al2O3">Mesoporous γ-Al2O3</option>
+                                <option value="MMSN">MMSN</option>
+                                <option value="MCF">MCF</option>
+                                <option value="MMON">MMON</option>
+                                <option value="MPS">MPS</option>
+                                <option value="BHMS">BHMS</option>
+                                <option value="SA">SA</option>
+                                <option value="FAU">FAU</option>
+                                <option value="MIL-101(Cr)">MIL-101(Cr)</option>
+                                <option value="MCM-36">MCM-36</option>
+                                <option value="THMS">THMS</option>
+                                <option value="MF">MF</option>
+                                <option value="NPREXAD4">NPREXAD4</option>
+                                <option value="NPRED4020">NPRED4020</option>
+                                <option value="PREXAD7">PREXAD7</option>
+                                <option value="PREHP2MG">PREHP2MG</option>
+                                <option value="PREDA201">PREDA201</option>
+                                <option value="NPREHP20">NPREHP20</option>
+                                <option value="R-CFA-SBA-15">R-CFA-SBA-15</option>
+                                <option value="W-CFA-SBA-15">W-CFA-SBA-15</option>
+                                <option value="ZN">ZN</option>
+                                <option value="AC">AC</option>
+                                <option value="FS">FS</option>
+                                <option value="CNS">CNS</option>
+                                <option value="CA">CA</option>
+                                <option value="PREHPD450">PREHPD450</option>
+                                <option value="MPC">MPC</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="amine1" class="form-label required">Amine 1 / Additive 1</label>
+                            <select class="form-select" id="amine1" required>
+                                <option value="">Select Amine/Additive 1</option>
+                                <option value="BPEI">BPEI</option>
+                                <option value="TEPA">TEPA</option>
+                                <option value="DEA">DEA</option>
+                                <option value="DETA">DETA</option>
+                                <option value="LPEI">LPEI</option>
+                                <option value="Ph-3-ED">Ph-3-ED</option>
+                                <option value="Ph-3-PD">Ph-3-PD</option>
+                                <option value="Ph-6-ED">Ph-6-ED</option>
+                                <option value="Ph-6-PD">Ph-6-PD</option>
+                                <option value="PEG200">PEG200</option>
+                                <option value="TETA">TETA</option>
+                                <option value="TPTA">TPTA</option>
+                                <option value="EI-Den">EI-Den</option>
+                                <option value="PI-Den">PI-Den</option>
+                                <option value="AM-TEPA">AM-TEPA</option>
+                                <option value="PAA">PAA</option>
+                                <option value="GPAA">GPAA</option>
+                                <option value="CTMA+">CTMA+</option>
+                                <option value="PPG">PPG</option>
+                                <option value="LPPI">LPPI</option>
+                                <option value="PGA">PGA</option>
+                                <option value="PZ">PZ</option>
+                                <option value="MEA">MEA</option>
+                                <option value="EDA">EDA</option>
+                                <option value="Spermine">Spermine</option>
+                                <option value="Spermidine">Spermidine</option>
+                                <option value="TREN">TREN</option>
+                                <option value="EP">EP</option>
+                                <option value="EB-TEPA">EB-TEPA</option>
+                                <option value="PEHA">PEHA</option>
+                                <option value="AN-TEPA">AN-TEPA</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="amine2" class="form-label">Amine 2 / Additive 2</label>
+                            <select class="form-select" id="amine2">
+                                <option value="No">No</option>
+                                <option value="DEA">DEA</option>
+                                <option value="CTAB">CTAB</option>
+                                <option value="P123">P123</option>
+                                <option value="PC">PC</option>
+                                <option value="PEG200">PEG200</option>
+                                <option value="SDS">SDS</option>
+                                <option value="Span80">Span80</option>
+                                <option value="PEG1000">PEG1000</option>
+                                <option value="CTAC">CTAC</option>
+                                <option value="DPPD">DPPD</option>
+                                <option value="TBD">TBD</option>
+                                <option value="DBPD">DBPD</option>
+                                <option value="BHT">BHT</option>
+                                <option value="PET">PET</option>
+                                <option value="TDE">TDE</option>
+                                <option value="HEDS">HEDS</option>
+                                <option value="DTDP">DTDP</option>
+                                <option value="BTES">BTES</option>
+                                <option value="APTES">APTES</option>
+                                <option value="TEOT">TEOT</option>
+                                <option value="CTMA+">CTMA+</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="additive3" class="form-label">Amine 3 / Additive 3</label>
+                            <select class="form-select" id="additive3">
+                                <option value="No">No</option>
+                                <option value="CTAC">CTAC</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <h3 class="section-title">Physical Properties</h3>
+                        
+                        <div class="mb-3">
+                            <label for="mw" class="form-label required">MW Mn (g/mol)</label>
+                            <input type="number" class="form-control" id="mw" min="0" max="20000" step="100" placeholder="e.g., 500.0" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="organicContent" class="form-label required">Organic Content (%)</label>
+                            <input type="number" class="form-control" id="organicContent" min="0" max="100" step="0.1" placeholder="e.g., 25.0" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="capacity" class="form-label required">CO₂ Capacity (mmol/g)</label>
+                            <input type="number" class="form-control" id="capacity" min="0" max="10" step="0.01" placeholder="e.g., 3.50" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="notes" class="form-label">Notes</label>
+                            <textarea class="form-control" id="notes" rows="3" placeholder="Additional observations or notes"></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="my-4">
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <h3 class="section-title">Experimental Conditions</h3>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="temperature" class="form-label required">Temperature (°C)</label>
+                            <input type="number" class="form-control" id="temperature" min="-50" max="200" step="0.1" value="25.0" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="humidity" class="form-label required">Humidity (%)</label>
+                            <input type="number" class="form-control" id="humidity" min="0" max="100" step="0.1" value="0.0" required>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label for="co2Concentration" class="form-label required">CO₂ Concentration (%)</label>
+                            <input type="number" class="form-control" id="co2Concentration" min="0" max="100" step="0.01" value="0.04" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="flowRate" class="form-label required">Flow Rate (mL/min)</label>
+                            <input type="number" class="form-control" id="flowRate" min="0" max="1000" step="0.1" value="100.0" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="testMethod" class="form-label required">Test Method</label>
+                            <select class="form-select" id="testMethod" required>
+                                <option value="TGA">TGA</option>
+                                <option value="BET">BET</option>
+                                <option value="Chemisorption">Chemisorption</option>
+                                <option value="Breakthrough">Breakthrough</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-grid gap-2 col-6 mx-auto mt-4">
+                    <button type="submit" class="btn btn-primary btn-submit">Submit Experimental Data</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('experimentalForm').addEventListener('submit', async function(e) {
+            e.preventDefault(); // Prevent default form submission
+            
+            // Get form values
+            const formData = {
+                experiments: [{
+                    Support: document.getElementById('support').value,
+                    "Amine_1_or_Additive_1": document.getElementById('amine1').value,
+                    "Amine_2_or_Additive_2": document.getElementById('amine2').value,
+                    "Amine_3_or_Additive_3": document.getElementById('additive3').value,
+                    "MW_Mn_g_mol": parseFloat(document.getElementById('mw').value),
+                    "Organic_Content_pct": parseFloat(document.getElementById('organicContent').value),
+                    "CO2_Capacity_mmol_g": parseFloat(document.getElementById('capacity').value),
+                    "Temperature": parseFloat(document.getElementById('temperature').value),
+                    "Humidity": parseFloat(document.getElementById('humidity').value),
+                    "CO2_Concentration": parseFloat(document.getElementById('co2Concentration').value),
+                    "Flow_Rate": parseFloat(document.getElementById('flowRate').value),
+                    "Test_Method": document.getElementById('testMethod').value,
+                    "Notes": document.getElementById('notes').value
+                }]
+            };
+            
+            // Validate required fields
+            if (!formData.experiments[0].Support || !formData.experiments[0]["Amine_1_or_Additive_1"] || 
+                !formData.experiments[0]["MW_Mn_g_mol"] || !formData.experiments[0]["Organic_Content_pct"] || 
+                !formData.experiments[0]["CO2_Capacity_mmol_g"]) {
+                alert('Please fill in all required fields.');
+                return;
+            }
+            
+            try {
+                // Submit to the backend API
+                const response = await fetch('/api/input-custom-experimental-results', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert(`Success: ${result.message}`);
+                    document.getElementById('experimentalForm').reset();
+                    
+                    // Reset default values
+                    document.getElementById('temperature').value = '25.0';
+                    document.getElementById('humidity').value = '0.0';
+                    document.getElementById('co2Concentration').value = '0.04';
+                    document.getElementById('flowRate').value = '100.0';
+                    document.getElementById('testMethod').value = 'TGA';
+                    document.getElementById('amine2').value = 'No';
+                    document.getElementById('additive3').value = 'No';
+                } else {
+                    alert(`Error: ${result.error}`);
+                }
+            } catch (error) {
+                console.error('Error submitting form:', error);
+                alert('An error occurred while submitting the form. Please try again.');
+            }
+        });
+    </script>
+</body>
+</html>

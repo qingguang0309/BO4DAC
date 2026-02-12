@@ -1,0 +1,2984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DAC Material Optimizer - 4-Step Process</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --success-color: #27ae60;
+            --warning-color: #f39c12;
+            --danger-color: #e74c3c;
+            --step-active: #3498db;
+            --step-completed: #27ae60;
+            --step-pending: #95a5a6;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-bottom: 50px;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, var(--primary-color) 0%, #34495e 100%);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            transition: transform 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            background-color: white;
+            border-bottom: 2px solid var(--secondary-color);
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background-color: var(--secondary-color);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+        }
+
+        .btn-primary:hover {
+            background-color: #2980b9;
+        }
+
+        /* Step Navigation */
+        .step-navigation {
+            display: flex;
+            justify-content: space-between;
+            margin: 30px 0;
+            position: relative;
+        }
+
+        .step-navigation:before {
+            content: '';
+            position: absolute;
+            top: 25px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background-color: #ecf0f1;
+            z-index: 1;
+        }
+
+        .step {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            flex: 1;
+        }
+
+        .step-circle {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background-color: white;
+            border: 3px solid var(--step-pending);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 10px;
+            font-weight: bold;
+            color: var(--step-pending);
+            transition: all 0.3s;
+        }
+
+        .step.active .step-circle {
+            border-color: var(--step-active);
+            background-color: var(--step-active);
+            color: white;
+        }
+
+        .step.completed .step-circle {
+            border-color: var(--step-completed);
+            background-color: var(--step-completed);
+            color: white;
+        }
+
+        .step-label {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--step-pending);
+        }
+
+        .step.active .step-label {
+            color: var(--step-active);
+        }
+
+        .step.completed .step-label {
+            color: var(--step-completed);
+        }
+
+        .step-content {
+            display: none;
+        }
+
+        .step-content.active {
+            display: block;
+            animation: fadeIn 0.5s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Configuration Badges */
+        .config-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            margin: 3px;
+            background-color: #e8f4fc;
+            border: 1px solid #b3dcf9;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .config-badge:hover {
+            background-color: #d4eaf9;
+            transform: translateY(-2px);
+        }
+
+        .config-badge.selected {
+            background-color: var(--secondary-color);
+            color: white;
+            border-color: var(--secondary-color);
+        }
+
+        .config-badge .badge-check {
+            display: none;
+            margin-left: 5px;
+        }
+
+        .config-badge.selected .badge-check {
+            display: inline-block;
+        }
+
+        /* Range Sliders */
+        .range-slider-container {
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        .range-values {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        /* Condition Cards */
+        .condition-card {
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .condition-card:hover {
+            border-color: var(--secondary-color);
+            background-color: #f8f9fa;
+        }
+
+        .condition-card.selected {
+            border-color: var(--secondary-color);
+            background-color: #e8f4fc;
+        }
+
+        .condition-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .condition-unit {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            display: none;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--secondary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Notification */
+        .notification {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1000;
+            min-width: 300px;
+            display: none;
+        }
+
+        /* Summary Panel */
+        .summary-item {
+            padding: 10px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .summary-item:last-child {
+            border-bottom: none;
+        }
+
+        .summary-label {
+            font-weight: 600;
+            color: #6c757d;
+        }
+
+        .summary-value {
+            font-weight: 500;
+            color: var(--primary-color);
+        }
+
+        /* Multi-select */
+        .multi-select-container {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+
+        .multi-select-item {
+            padding: 5px 10px;
+            margin: 2px 0;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .multi-select-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .multi-select-item.selected {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+
+        /* Capacity Value */
+        .capacity-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        /* Candidate Card */
+        .candidate-card {
+            border-left: 4px solid var(--secondary-color);
+        }
+
+        .best-candidate {
+            border-left: 4px solid var(--success-color);
+            background-color: rgba(39, 174, 96, 0.05);
+        }
+
+        /* Experiment History */
+        .experiment-history {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        /* Model Metrics */
+        .model-metrics {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .metric-card {
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .metric-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-top: 3px;
+        }
+
+        /* Responsive Adjustments */
+        @media (max-width: 768px) {
+            .step-navigation {
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .step-navigation:before {
+                display: none;
+            }
+
+            .step {
+                display: flex;
+                align-items: center;
+                text-align: left;
+            }
+
+            .step-circle {
+                margin: 0 15px 0 0;
+            }
+
+            .model-metrics {
+                grid-template-columns: 1fr;
+            }
+        }
+        /* Chart container improvements */
+        #optimizationChartImg {
+            width: 100%;
+            max-height: 300px;
+            object-fit: contain;
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 10px;
+        }
+
+        /* Improve chart card appearance */
+        .card .card-body canvas {
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+
+        /* Chart tooltip improvements */
+        .chartjs-tooltip {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+            border-radius: 6px !important;
+            border: 1px solid #dee2e6 !important;
+        }
+
+        /* Smooth chart transitions */
+        canvas {
+            transition: opacity 0.3s ease;
+        }
+
+        /* Chart loading state */
+        .chart-loading {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        /* Responsive chart adjustments */
+        @media (max-width: 768px) {
+            #optimizationChartImg {
+                max-height: 250px;
+            }
+
+            .card .card-body img {
+                margin: 0 -15px;
+                width: calc(100% + 30px) !important;
+                max-width: calc(100% + 30px);
+            }
+        }
+        
+        /* Table styles for historical records */
+        .historical-table {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Notification -->
+    <div class="notification alert alert-success alert-dismissible fade show" role="alert" id="notification">
+        <span id="notificationMessage"></span>
+        <button type="button" class="btn-close" onclick="hideNotification()"></button>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-cloud-fog me-2"></i>
+                DAC Material Optimizer
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/experimental-form">
+                    <i class="bi bi-file-earmark-plus me-1"></i>Submit Results
+                </a>
+                <div class="navbar-text ms-3">
+                    <span class="badge bg-light text-dark" id="systemStatusBadge">Setup Required</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- Step Navigation -->
+        <div class="step-navigation">
+            <div class="step active" id="step1">
+                <div class="step-circle">1</div>
+                <div class="step-label">Set Search Bounds</div>
+            </div>
+            <div class="step" id="step2">
+                <div class="step-circle">2</div>
+                <div class="step-label">Set Conditions</div>
+            </div>
+            <div class="step" id="step3">
+                <div class="step-circle">3</div>
+                <div class="step-label">Submit Historical Records</div>
+            </div>
+            <div class="step" id="step4">
+                <div class="step-circle">4</div>
+                <div class="step-label">Optimization</div>
+            </div>
+        </div>
+
+        <!-- Step 1: Set Search Bounds -->
+        <div class="step-content active" id="step1Content">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-bounding-box me-2"></i>Step 1: Define Search Space Bounds
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <!-- Left Column: Support Materials -->
+                        <div class="col-md-4">
+                            <div class="mb-4">
+                                <h5>Support Materials</h5>
+                                <p class="text-muted small">Select support materials to include in search</p>
+                                <div class="multi-select-container" id="supportsContainer">
+                                    <!-- Supports will be populated by JavaScript -->
+                                </div>
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="selectAll('supports')">Select All</button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('supports')">Deselect All</button>
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <h5>Additive 3</h5>
+                                <p class="text-muted small">Select additive options</p>
+                                <div id="additive3Container">
+                                    <!-- Additive 3 options will be populated -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Middle Column: Amines/Additives -->
+                        <div class="col-md-4">
+                            <div class="mb-4">
+                                <h5>Amine 1 / Additive 1</h5>
+                                <p class="text-muted small">Primary amines or additives to include</p>
+                                <div class="multi-select-container" id="amine1Container">
+                                    <!-- Amine 1 options will be populated -->
+                                </div>
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="selectAll('amine1')">Select All</button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('amine1')">Deselect All</button>
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <h5>Amine 2 / Additive 2</h5>
+                                <p class="text-muted small">Secondary amines or additives to include</p>
+                                <div class="multi-select-container" id="amine2Container">
+                                    <!-- Amine 2 options will be populated -->
+                                </div>
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="selectAll('amine2')">Select All</button>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('amine2')">Deselect All</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column: Continuous Parameters -->
+                        <div class="col-md-4">
+                            <div class="mb-4">
+                                <h5>Molecular Weight Range</h5>
+                                <p class="text-muted small">Set bounds for MW_Mn (g/mol)</p>
+                                <div class="range-slider-container">
+                                    <input type="range" class="form-range" min="0" max="20000" step="100"
+                                           id="mwMinSlider" value="0">
+                                    <input type="range" class="form-range" min="0" max="20000" step="100"
+                                           id="mwMaxSlider" value="10000">
+                                    <div class="range-values">
+                                        <span id="mwMinValue">0</span> g/mol
+                                        <span id="mwMaxValue">10000</span> g/mol
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <h5>Organic Content Range</h5>
+                                <p class="text-muted small">Set bounds for Organic Content (%)</p>
+                                <div class="range-slider-container">
+                                    <input type="range" class="form-range" min="0" max="100" step="1"
+                                           id="ocMinSlider" value="0">
+                                    <input type="range" class="form-range" min="0" max="100" step="1"
+                                           id="ocMaxSlider" value="100">
+                                    <div class="range-values">
+                                        <span id="ocMinValue">0</span> %
+                                        <span id="ocMaxValue">100</span> %
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="alert alert-info">
+                                <small>
+                                    <i class="bi bi-info-circle"></i>
+                                    These bounds define the search space for the optimization algorithm.
+                                    Narrower bounds can speed up convergence but may exclude optimal solutions.
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Search Space Summary -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <i class="bi bi-list-check me-2"></i>Search Space Summary
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Supports</div>
+                                        <div class="summary-value" id="summarySupports">0 selected</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Amine 1</div>
+                                        <div class="summary-value" id="summaryAmine1">0 selected</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Amine 2</div>
+                                        <div class="summary-value" id="summaryAmine2">0 selected</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Additive 3</div>
+                                        <div class="summary-value" id="summaryAdditive3">0 selected</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col-md-6">
+                                    <div class="summary-item">
+                                        <div class="summary-label">MW Range</div>
+                                        <div class="summary-value" id="summaryMWRange">0 - 10000 g/mol</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Organic Content Range</div>
+                                        <div class="summary-value" id="summaryOCRange">0 - 100 %</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="text-end mt-4">
+                        <button class="btn btn-primary" onclick="goToStep(2)">
+                            Continue to Step 2
+                            <i class="bi bi-arrow-right ms-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 2: Set Experimental Conditions -->
+        <div class="step-content" id="step2Content">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-sliders me-2"></i>Step 2: Set Experimental Conditions
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <!-- CO₂ Concentration -->
+                            <div class="condition-card" onclick="selectCondition('co2')" id="co2Card">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6>CO₂ Concentration</h6>
+                                        <p class="text-muted small mb-0">Volume percentage of CO₂ in gas stream</p>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="condition-value" id="co2Value">0.04</div>
+                                        <div class="condition-unit">vol %</div>
+                                    </div>
+                                </div>
+                                <div class="mt-3" id="co2Controls" style="display: none;">
+                                    <input type="range" class="form-range" min="0.01" max="20" step="0.01"
+                                           id="co2Slider" value="0.04" oninput="updateCo2Value(this.value)">
+                                    <div class="d-flex justify-content-between">
+                                        <small>0.01%</small>
+                                        <small>20%</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Temperature -->
+                            <div class="condition-card" onclick="selectCondition('temperature')" id="temperatureCard">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6>Temperature</h6>
+                                        <p class="text-muted small mb-0">Adsorption temperature</p>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="condition-value" id="temperatureValue">25.0</div>
+                                        <div class="condition-unit">°C</div>
+                                    </div>
+                                </div>
+                                <div class="mt-3" id="temperatureControls" style="display: none;">
+                                    <input type="range" class="form-range" min="-20" max="100" step="0.1"
+                                           id="temperatureSlider" value="25.0" oninput="updateTemperatureValue(this.value)">
+                                    <div class="d-flex justify-content-between">
+                                        <small>-20°C</small>
+                                        <small>100°C</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <!-- Humidity -->
+                            <div class="condition-card" onclick="selectCondition('humidity')" id="humidityCard">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6>Relative Humidity</h6>
+                                        <p class="text-muted small mb-0">Relative humidity percentage</p>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="condition-value" id="humidityValue">0</div>
+                                        <div class="condition-unit">%</div>
+                                    </div>
+                                </div>
+                                <div class="mt-3" id="humidityControls" style="display: none;">
+                                    <input type="range" class="form-range" min="0" max="100" step="1"
+                                           id="humiditySlider" value="0" oninput="updateHumidityValue(this.value)">
+                                    <div class="d-flex justify-content-between">
+                                        <small>0%</small>
+                                        <small>100%</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Flow Rate -->
+                            <div class="condition-card" onclick="selectCondition('flowRate')" id="flowRateCard">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6>Flow Rate</h6>
+                                        <p class="text-muted small mb-0">Gas flow rate</p>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="condition-value" id="flowRateValue">100.0</div>
+                                        <div class="condition-unit">mL/min</div>
+                                    </div>
+                                </div>
+                                <div class="mt-3" id="flowRateControls" style="display: none;">
+                                    <input type="range" class="form-range" min="10" max="500" step="5"
+                                           id="flowRateSlider" value="100.0" oninput="updateFlowRateValue(this.value)">
+                                    <div class="d-flex justify-content-between">
+                                        <small>10 mL/min</small>
+                                        <small>500 mL/min</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Test Method Selection -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <i class="bi bi-clipboard-data me-2"></i>Test Method
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="testMethod"
+                                               id="tgaMethod" value="TGA" checked>
+                                        <label class="form-check-label" for="tgaMethod">
+                                            <strong>TGA</strong><br>
+                                            <small class="text-muted">Thermogravimetric Analysis</small>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="testMethod"
+                                               id="breakthroughMethod" value="BET">
+                                        <label class="form-check-label" for="breakthroughMethod">
+                                            <strong>Breakthrough</strong><br>
+                                            <small class="text-muted">Column breakthrough testing</small>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="testMethod"
+                                               id="otherMethod" value="Other">
+                                        <label class="form-check-label" for="otherMethod">
+                                            <strong>Other</strong><br>
+                                            <small class="text-muted">Custom test method</small>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Conditions Summary -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <i class="bi bi-clipboard-check me-2"></i>Experimental Conditions Summary
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="summary-item">
+                                        <div class="summary-label">CO₂ Concentration</div>
+                                        <div class="summary-value" id="finalCo2">0.04 vol %</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Temperature</div>
+                                        <div class="summary-value" id="finalTemperature">25.0 °C</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Humidity</div>
+                                        <div class="summary-value" id="finalHumidity">0 %</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Flow Rate</div>
+                                        <div class="summary-value" id="finalFlowRate">100.0 mL/min</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="summary-item">
+                                        <div class="summary-label">Test Method</div>
+                                        <div class="summary-value" id="finalTestMethod">TGA</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-between mt-4">
+                        <button class="btn btn-outline-secondary" onclick="goToStep(1)">
+                            <i class="bi bi-arrow-left me-2"></i>
+                            Back to Step 1
+                        </button>
+                        <button class="btn btn-primary" onclick="goToStep(3)">
+                            Continue to Step 3
+                            <i class="bi bi-arrow-right ms-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Submit Historical Records -->
+        <div class="step-content" id="step3Content">
+            <div class="card">
+                <div class="card-header">
+                    <i class="bi bi-file-earmark-spreadsheet me-2"></i>Step 3: Submit Historical Records
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Upload your historical experimental data to train the optimization model. 
+                        This will help the AI make better predictions based on your previous results.
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <i class="bi bi-upload me-2"></i>Upload Historical Data
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="historicalFile" class="form-label">Upload CSV file with historical data</label>
+                                        <input type="file" class="form-control" id="historicalFile" accept=".csv">
+                                        <div class="form-text">
+                                            Upload a CSV file containing your historical experimental data with columns:
+                                            Support, Amine_1_or_Additive_1, Amine_2_or_Additive_2, Amine_3_or_Additive_3,
+                                            MW_Mn_g_mol, Organic_Content_pct, CO2_Capacity_mmol_g
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <button class="btn btn-primary" onclick="uploadHistoricalData()">
+                                            <i class="bi bi-cloud-upload me-2"></i>
+                                            Upload & Process Data
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <button class="btn btn-success" onclick="submitHistoricalRecords()">
+                                            <i class="bi bi-database-check me-2"></i>
+                                            Submit Historical Records as Training Data
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <i class="bi bi-plus-circle me-2"></i>Add Individual Record
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="exp-support" class="form-label">Support:</label>
+                                        <select id="exp-support" class="form-control" required>
+                                            <option value="">Select Support</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="exp-amine1" class="form-label">Amine 1 / Additive 1:</label>
+                                        <select id="exp-amine1" class="form-control" required>
+                                            <option value="">Select Amine/Additive</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="exp-amine2" class="form-label">Amine 2 / Additive 2:</label>
+                                        <select id="exp-amine2" class="form-control">
+                                            <option value="No">No</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="exp-additive3" class="form-label">Amine 3 / Additive 3:</label>
+                                        <select id="exp-additive3" class="form-control">
+                                            <option value="No">No</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="exp-mw" class="form-label">MW Mn (g/mol):</label>
+                                        <input type="number" id="exp-mw" class="form-control" min="0" max="20000" step="100" required>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="exp-oc" class="form-label">Organic Content (%):</label>
+                                        <input type="number" id="exp-oc" class="form-control" min="0" max="100" step="0.1" required>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="exp-capacity" class="form-label">CO₂ Capacity (mmol/g):</label>
+                                        <input type="number" id="exp-capacity" class="form-control" min="0" max="10" step="0.01" required>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <button class="btn btn-success" onclick="addIndividualRecord()">
+                                            <i class="bi bi-plus me-2"></i>
+                                            Add Record
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Uploaded Records Preview -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <i class="bi bi-table me-2"></i>Uploaded Records Preview
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive historical-table">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Support</th>
+                                            <th>Amine 1</th>
+                                            <th>Amine 2</th>
+                                            <th>Amine 3</th>
+                                            <th>MW (g/mol)</th>
+                                            <th>Org. Content (%)</th>
+                                            <th>CO₂ Capacity (mmol/g)</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="historicalRecordsTable">
+                                        <tr>
+                                            <td colspan="8" class="text-center text-muted">No records uploaded yet</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-between mt-4">
+                        <button class="btn btn-outline-secondary" onclick="goToStep(2)">
+                            <i class="bi bi-arrow-left me-2"></i>
+                            Back to Step 2
+                        </button>
+                        <button class="btn btn-primary" onclick="initializeSystem()">
+                            Initialize Optimization System
+                            <i class="bi bi-check-circle ms-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 4: Optimization Interface -->
+        <div class="step-content" id="step4Content">
+            <div class="row">
+                <!-- Left Column: Status and Progress (4 columns) -->
+                <div class="col-md-4">
+                    <!-- Optimization Status -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="bi bi-speedometer2 me-2"></i>Optimization Status
+                        </div>
+                        <div class="card-body">
+                            <div class="row text-center">
+                                <div class="col-6 mb-3">
+                                    <div class="metric-value display-6 text-primary" id="modelAccuracy">0.0000</div>
+                                    <div class="metric-label">Best Capacity (mmol/g)</div>
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <div class="metric-value display-6 text-success" id="iterationCount">0</div>
+                                    <div class="metric-label">Iterations</div>
+                                </div>
+                            </div>
+                            <div class="row text-center">
+                                <div class="col-6 mb-3">
+                                    <div class="metric-value display-6 text-info" id="realExperiments">0</div>
+                                    <div class="metric-label">Real Experiments</div>
+                                </div>
+                                <div class="col-6 mb-3">
+                                    <div class="metric-value display-6 text-warning" id="dataPoints">0</div>
+                                    <div class="metric-label">Data Points</div>
+                                </div>
+                            </div>
+
+                            <div class="mt-4">
+                                <button class="btn btn-primary w-100 mb-2" onclick="generateCandidates()">
+                                    <i class="bi bi-magic me-2"></i>
+                                    Generate Top Candidate
+                                </button>
+                                <button class="btn btn-success w-100 mb-2" onclick="recordExperiment()">
+                                    <i class="bi bi-plus-circle me-2"></i>
+                                    Input Experimental Results
+                                </button>
+                                <a href="/experimental-form" class="btn btn-outline-primary w-100 mb-2">
+                                    <i class="bi bi-file-earmark-plus me-2"></i>
+                                    Submit Multiple Results
+                                </a>
+                                <div class="alert alert-info">
+                                    <small>
+                                        <i class="bi bi-info-circle"></i>
+                                        <strong>Important:</strong> Input your experimental results here after testing candidates to improve the model and get better recommendations.
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Input Experimental Results Section -->
+                    <div class="card mt-4">
+                        <div class="card-header">
+                            <i class="bi bi-database-add me-2"></i>Input Custom Experimental Data
+                        </div>
+                        <div class="card-body">
+                            <p class="mb-3">Input experimental results for catalyst formulations that match your current search bounds and conditions. This will help the AI model make better predictions.</p>
+
+                            <div id="bulk-input-form">
+                                <div class="row">
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-support-opt">Support:</label>
+                                        <select id="exp-support-opt" class="form-control" required>
+                                            <option value="">Select Support</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-amine1-opt">Amine 1 / Additive 1:</label>
+                                        <select id="exp-amine1-opt" class="form-control" required>
+                                            <option value="">Select Amine/Additive</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-amine2-opt">Amine 2 / Additive 2:</label>
+                                        <select id="exp-amine2-opt" class="form-control" required>
+                                            <option value="No">No</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-additive3-opt">Amine 3 / Additive 3:</label>
+                                        <select id="exp-additive3-opt" class="form-control" required>
+                                            <option value="No">No</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-mw-opt">MW Mn (g/mol):</label>
+                                        <input type="number" id="exp-mw-opt" class="form-control" min="0" max="20000" step="100" required>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-oc-opt">Organic Content (%):</label>
+                                        <input type="number" id="exp-oc-opt" class="form-control" min="0" max="100" step="0.1" required>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-capacity-opt">CO₂ Capacity (mmol/g):</label>
+                                        <input type="number" id="exp-capacity-opt" class="form-control" min="0" max="10" step="0.01" required>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-notes-opt">Notes:</label>
+                                        <input type="text" id="exp-notes-opt" class="form-control" placeholder="Additional notes">
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-temp-opt">Temperature (°C):</label>
+                                        <input type="number" id="exp-temp-opt" class="form-control" value="25.0" min="-50" max="200" step="0.1" required>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-humidity-opt">Humidity (%):</label>
+                                        <input type="number" id="exp-humidity-opt" class="form-control" value="0.0" min="0" max="100" step="0.1" required>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-co2-conc-opt">CO₂ Concentration (%):</label>
+                                        <input type="number" id="exp-co2-conc-opt" class="form-control" value="0.04" min="0" max="100" step="0.01" required>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label for="exp-flow-rate-opt">Flow Rate (mL/min):</label>
+                                        <input type="number" id="exp-flow-rate-opt" class="form-control" value="100.0" min="0" max="1000" step="0.1" required>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="exp-test-method-opt">Test Method:</label>
+                                    <select id="exp-test-method-opt" class="form-control" required>
+                                        <option value="TGA" selected>TGA</option>
+                                        <option value="BET">BET</option>
+                                        <option value="Chemisorption">Chemisorption</option>
+                                        <option value="Breakthrough">Breakthrough</option>
+                                    </select>
+                                </div>
+
+                                <div class="mt-3">
+                                    <button class="btn btn-success" onclick="submitCustomExperimentalData()">
+                                        <i class="bi bi-save me-2"></i>
+                                        Submit Experimental Data
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Optimization Progress Chart -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="bi bi-graph-up me-2"></i>Optimization Progress
+                        </div>
+                        <div class="card-body text-center">
+                            <img id="optimizationChartImg" src="" alt="Optimization Chart" style="width: 100%; max-height: 300px; object-fit: contain;" onerror="this.src=''; this.alt='Chart not available';">
+                            <div class="text-center mt-2">
+                                <small class="text-muted">Capacity over iterations</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Middle Column: Top 5 Candidates Details (5 columns) -->
+                <div class="col-md-5">
+                    <!-- Current Candidates -->
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="bi bi-bar-chart me-2"></i>Top 5 Candidates Details
+                            </div>
+                            <div>
+                                <span class="badge bg-info" id="candidateCount">0 Candidates</span>
+                            </div>
+                        </div>
+                        <div class="card-body" id="candidatesContainer">
+                            <div class="text-center text-muted p-4">
+                                <i class="bi bi-graph-up display-6"></i>
+                                <p class="mt-3">Generate candidates to see details</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Recent Experiments, Model Information and Actions (3 columns) -->
+                <div class="col-md-3">
+                    <!-- Recent Experiments -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="bi bi-list-check me-2"></i>Recent Experiments
+                        </div>
+                        <div class="card-body experiment-history" id="predictionAccuracy">
+                            <div class="text-center text-muted p-4">
+                                No experiments yet
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Model Information -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <i class="bi bi-cpu me-2"></i>Model Information
+                        </div>
+                        <div class="card-body">
+                            <small>
+                                <div class="mb-2">
+                                    <strong>GP Model:</strong> SingleTaskGP
+                                </div>
+                                <div class="mb-2">
+                                    <strong>Kernel:</strong> Matern 5/2
+                                </div>
+                                <div class="mb-2">
+                                    <strong>Acquisition:</strong> Expected Improvement
+                                </div>
+                                <div class="mb-2">
+                                    <strong>Training Points:</strong> <span id="trainingPoints">0</span>
+                                </div>
+                                <div class="mb-2">
+                                    <strong>Model Fit:</strong> <span id="modelFit">Not fitted</span>
+                                </div>
+                            </small>
+                        </div>
+                    </div>
+
+                    <!-- System Actions -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="bi bi-gear me-2"></i>Actions
+                        </div>
+                        <div class="card-body">
+                            <button class="btn btn-outline-secondary w-100 mb-2" onclick="exportData()">
+                                <i class="bi bi-download me-2"></i>
+                                Export Data
+                            </button>
+                            <button class="btn btn-outline-secondary w-100" onclick="restartSetup()">
+                                <i class="bi bi-arrow-clockwise me-2"></i>
+                                Restart Setup
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Recording Experiment -->
+    <div class="modal fade" id="recordExperimentModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Record Experimental Result</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="recordExperimentContent">
+                    <!-- Content will be populated dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Configuration data
+        const DEFAULT_CONFIG = {
+            supports: [
+                'SBA-15', 'NS', 'MCM-41', 'MCM-48', 'Mesoporous γ-Al2O3', 'MMSN',
+                'MCF', 'MMON', 'MPS', 'BHMS', 'SA', 'FAU', 'MIL-101(Cr)', 'MCM-36',
+                'THMS', 'MF', 'NPREXAD4', 'NPRED4020', 'PREXAD7', 'PREHP2MG',
+                'PREDA201', 'NPREHP20', 'R-CFA-SBA-15', 'W-CFA-SBA-15', 'ZN', 'AC',
+                'FS', 'CNS', 'CA', 'PREHPD450', 'MPC'
+            ],
+            amine1: [
+                'BPEI', 'TEPA', 'DEA', 'DETA', 'LPEI', 'Ph-3-ED', 'Ph-3-PD',
+                'Ph-6-ED', 'Ph-6-PD', 'PEG200', 'TETA', 'TPTA', 'EI-Den', 'PI-Den',
+                'AM-TEPA', 'PAA', 'GPAA', 'CTMA+', 'PPG', 'LPPI', 'PGA', 'PZ',
+                'MEA', 'EDA', 'Spermine', 'Spermidine', 'TREN', 'EP', 'EB-TEPA',
+                'PEHA', 'AN-TEPA'
+            ],
+            amine2: [
+                'No', 'DEA', 'CTAB', 'P123', 'PC', 'PEG200', 'SDS', 'Span80',
+                'PEG1000', 'CTAC', 'DPPD', 'TBD', 'DBPD', 'BHT', 'PET', 'TDE',
+                'HEDS', 'DTDP', 'BTES', 'APTES', 'TEOT', 'CTMA+'
+            ],
+            additive3: ['No', 'CTAC']
+        };
+
+        // Global state
+        let currentState = {
+            step: 1,
+            searchBounds: {
+                supports: DEFAULT_CONFIG.supports,
+                amine1: DEFAULT_CONFIG.amine1,
+                amine2: DEFAULT_CONFIG.amine2,
+                additive3: DEFAULT_CONFIG.additive3,
+                mwRange: [0, 10000],
+                ocRange: [0, 100]
+            },
+            conditions: {
+                co2Concentration: 0.04,
+                temperature: 25.0,
+                humidity: 0,
+                flowRate: 100.0,
+                testMethod: 'TGA'
+            },
+            optimization: {
+                iteration: 0,
+                bestCapacity: 0.0,
+                realExperiments: 0,
+                totalDataPoints: 0,
+                currentCandidates: [],
+                experimentHistory: []
+            },
+            historicalRecords: []
+        };
+
+        const originalGoToStep = goToStep;
+
+        // Step Navigation
+        function goToStep(stepNumber) {
+            // Update step indicators
+            document.querySelectorAll('.step').forEach((step, index) => {
+                const stepIndex = index + 1;
+                if (stepIndex < stepNumber) {
+                    step.classList.add('completed');
+                    step.classList.remove('active');
+                } else if (stepIndex === stepNumber) {
+                    step.classList.add('active');
+                    step.classList.remove('completed');
+                } else {
+                    step.classList.remove('active', 'completed');
+                }
+            });
+
+            // Update content visibility
+            document.querySelectorAll('.step-content').forEach((content, index) => {
+                const contentIndex = index + 1;
+                if (contentIndex === stepNumber) {
+                    content.classList.add('active');
+                } else {
+                    content.classList.remove('active');
+                }
+            });
+
+            currentState.step = stepNumber;
+
+            // Update summaries
+            if (stepNumber === 1) {
+                updateStep1Summary();
+            } else if (stepNumber === 2) {
+                updateStep2Summary();
+            } else if (stepNumber === 3) {
+                updateStep3Summary();
+                populateHistoricalForm();
+            } else if (stepNumber === 4) {
+                updateStep4Summary();
+                loadSystemStatus();
+
+                // Refresh chart when entering step 4
+                setTimeout(refreshChartOnStep4, 500);
+            }
+        }
+
+        // Helper function to refresh chart when step 4 is active
+        function refreshChartOnStep4() {
+            if (currentState.step === 4) {
+                updateOptimizationChart();
+            }
+        }
+
+        // Initialize multi-select components
+        function initializeMultiSelect() {
+            console.log("Initializing multi-select components...");
+
+            // Clear existing content first
+            const supportsContainerEl = document.getElementById('supportsContainer');
+            const amine1ContainerEl = document.getElementById('amine1Container');
+            const amine2ContainerEl = document.getElementById('amine2Container');
+            const additive3ContainerEl = document.getElementById('additive3Container');
+
+            if (supportsContainerEl) supportsContainerEl.innerHTML = '';
+            if (amine1ContainerEl) amine1ContainerEl.innerHTML = '';
+            if (amine2ContainerEl) amine2ContainerEl.innerHTML = '';
+            if (additive3ContainerEl) additive3ContainerEl.innerHTML = '';
+
+            // Initialize supports
+            const supportsContainer = document.getElementById('supportsContainer');
+
+            DEFAULT_CONFIG.supports.forEach(support => {
+                const isSelected = currentState.searchBounds && currentState.searchBounds.supports &&
+                                  Array.isArray(currentState.searchBounds.supports) &&
+                                  currentState.searchBounds.supports.includes(support);
+                const item = document.createElement('div');
+                item.className = `multi-select-item ${isSelected ? 'selected' : ''}`;
+                item.textContent = support;
+                item.onclick = () => toggleSelection('supports', support, item);
+                supportsContainer.appendChild(item);
+            });
+
+            // Initialize amine1
+            const amine1Container = document.getElementById('amine1Container');
+
+            DEFAULT_CONFIG.amine1.forEach(amine => {
+                const isSelected = currentState.searchBounds && currentState.searchBounds.amine1 &&
+                                  Array.isArray(currentState.searchBounds.amine1) &&
+                                  currentState.searchBounds.amine1.includes(amine);
+                const item = document.createElement('div');
+                item.className = `multi-select-item ${isSelected ? 'selected' : ''}`;
+                item.textContent = amine;
+                item.onclick = () => toggleSelection('amine1', amine, item);
+                amine1Container.appendChild(item);
+            });
+
+            // Initialize amine2
+            const amine2Container = document.getElementById('amine2Container');
+
+            DEFAULT_CONFIG.amine2.forEach(amine => {
+                const isSelected = currentState.searchBounds && currentState.searchBounds.amine2 &&
+                                  Array.isArray(currentState.searchBounds.amine2) &&
+                                  currentState.searchBounds.amine2.includes(amine);
+                const item = document.createElement('div');
+                item.className = `multi-select-item ${isSelected ? 'selected' : ''}`;
+                item.textContent = amine;
+                item.onclick = () => toggleSelection('amine2', amine, item);
+                amine2Container.appendChild(item);
+            });
+
+            // Initialize additive3
+            const additive3Container = document.getElementById('additive3Container');
+
+            DEFAULT_CONFIG.additive3.forEach(additive => {
+                const isSelected = currentState.searchBounds && currentState.searchBounds.additive3 &&
+                                  Array.isArray(currentState.searchBounds.additive3) &&
+                                  currentState.searchBounds.additive3.includes(additive);
+                const badge = document.createElement('span');
+                badge.className = `config-badge ${isSelected ? 'selected' : ''}`;
+                badge.innerHTML = `
+                    ${additive}
+                    <i class="bi bi-check-circle-fill badge-check"></i>
+                `;
+                badge.onclick = () => toggleBadgeSelection('additive3', additive, badge);
+                additive3Container.appendChild(badge);
+            });
+
+            // Initialize range sliders
+            updateRangeSliders();
+
+            // Initialize summaries
+            updateStep1Summary();
+        }
+
+        function toggleSelection(type, value, element) {
+            const array = currentState.searchBounds[type];
+            const index = array.indexOf(value);
+
+            if (index === -1) {
+                array.push(value);
+                element.classList.add('selected');
+            } else {
+                array.splice(index, 1);
+                element.classList.remove('selected');
+            }
+
+            updateStep1Summary();
+        }
+
+        function toggleBadgeSelection(type, value, element) {
+            const array = currentState.searchBounds[type];
+            const index = array.indexOf(value);
+
+            if (index === -1) {
+                array.push(value);
+                element.classList.add('selected');
+            } else {
+                array.splice(index, 1);
+                element.classList.remove('selected');
+            }
+
+            updateStep1Summary();
+        }
+
+        function selectAll(type) {
+            const container = document.getElementById(`${type}Container`);
+            if (!container) return;
+
+            const items = container.querySelectorAll('.multi-select-item');
+            items.forEach(item => {
+                item.classList.add('selected');
+                const value = item.textContent;
+                if (!currentState.searchBounds[type].includes(value)) {
+                    currentState.searchBounds[type].push(value);
+                }
+            });
+            updateStep1Summary();
+        }
+
+        function deselectAll(type) {
+            const container = document.getElementById(`${type}Container`);
+            if (!container) return;
+
+            const items = container.querySelectorAll('.multi-select-item');
+            items.forEach(item => {
+                item.classList.remove('selected');
+            });
+            currentState.searchBounds[type] = [];
+            updateStep1Summary();
+        }
+
+        // Range slider functions
+        function updateRangeSliders() {
+            // MW sliders
+            const mwMinSlider = document.getElementById('mwMinSlider');
+            const mwMaxSlider = document.getElementById('mwMaxSlider');
+            const mwMinValue = document.getElementById('mwMinValue');
+            const mwMaxValue = document.getElementById('mwMaxValue');
+
+            if (mwMinSlider && mwMaxSlider && mwMinValue && mwMaxValue) {
+                mwMinSlider.value = currentState.searchBounds.mwRange[0];
+                mwMaxSlider.value = currentState.searchBounds.mwRange[1];
+                mwMinValue.textContent = currentState.searchBounds.mwRange[0];
+                mwMaxValue.textContent = currentState.searchBounds.mwRange[1];
+
+                mwMinSlider.oninput = function() {
+                    const value = parseInt(this.value);
+                    if (value > parseInt(mwMaxSlider.value)) {
+                        mwMaxSlider.value = value;
+                        currentState.searchBounds.mwRange[1] = value;
+                        mwMaxValue.textContent = value;
+                    }
+                    currentState.searchBounds.mwRange[0] = value;
+                    mwMinValue.textContent = value;
+                    updateStep1Summary();
+                };
+
+                mwMaxSlider.oninput = function() {
+                    const value = parseInt(this.value);
+                    if (value < parseInt(mwMinSlider.value)) {
+                        mwMinSlider.value = value;
+                        currentState.searchBounds.mwRange[0] = value;
+                        mwMinValue.textContent = value;
+                    }
+                    currentState.searchBounds.mwRange[1] = value;
+                    mwMaxValue.textContent = value;
+                    updateStep1Summary();
+                };
+            }
+
+            // Organic content sliders
+            const ocMinSlider = document.getElementById('ocMinSlider');
+            const ocMaxSlider = document.getElementById('ocMaxSlider');
+            const ocMinValue = document.getElementById('ocMinValue');
+            const ocMaxValue = document.getElementById('ocMaxValue');
+
+            if (ocMinSlider && ocMaxSlider && ocMinValue && ocMaxValue) {
+                ocMinSlider.value = currentState.searchBounds.ocRange[0];
+                ocMaxSlider.value = currentState.searchBounds.ocRange[1];
+                ocMinValue.textContent = currentState.searchBounds.ocRange[0];
+                ocMaxValue.textContent = currentState.searchBounds.ocRange[1];
+
+                ocMinSlider.oninput = function() {
+                    const value = parseInt(this.value);
+                    if (value > parseInt(ocMaxSlider.value)) {
+                        ocMaxSlider.value = value;
+                        currentState.searchBounds.ocRange[1] = value;
+                        ocMaxValue.textContent = value;
+                    }
+                    currentState.searchBounds.ocRange[0] = value;
+                    ocMinValue.textContent = value;
+                    updateStep1Summary();
+                };
+
+                ocMaxSlider.oninput = function() {
+                    const value = parseInt(this.value);
+                    if (value < parseInt(ocMinSlider.value)) {
+                        ocMinSlider.value = value;
+                        currentState.searchBounds.ocRange[0] = value;
+                        ocMinValue.textContent = value;
+                    }
+                    currentState.searchBounds.ocRange[1] = value;
+                    ocMaxValue.textContent = value;
+                    updateStep1Summary();
+                };
+            }
+        }
+
+        // Step 1 Summary
+        function updateStep1Summary() {
+            const supportsElem = document.getElementById('summarySupports');
+            const amine1Elem = document.getElementById('summaryAmine1');
+            const amine2Elem = document.getElementById('summaryAmine2');
+            const additive3Elem = document.getElementById('summaryAdditive3');
+            const mwRangeElem = document.getElementById('summaryMWRange');
+            const ocRangeElem = document.getElementById('summaryOCRange');
+
+            if (supportsElem) {
+                supportsElem.textContent = `${currentState.searchBounds.supports.length} selected`;
+            }
+            if (amine1Elem) {
+                amine1Elem.textContent = `${currentState.searchBounds.amine1.length} selected`;
+            }
+            if (amine2Elem) {
+                amine2Elem.textContent = `${currentState.searchBounds.amine2.length} selected`;
+            }
+            if (additive3Elem) {
+                additive3Elem.textContent = `${currentState.searchBounds.additive3.length} selected`;
+            }
+            if (mwRangeElem) {
+                mwRangeElem.textContent =
+                    `${currentState.searchBounds.mwRange[0]} - ${currentState.searchBounds.mwRange[1]} g/mol`;
+            }
+            if (ocRangeElem) {
+                ocRangeElem.textContent =
+                    `${currentState.searchBounds.ocRange[0]} - ${currentState.searchBounds.ocRange[1]} %`;
+            }
+        }
+
+        // Step 2 Functions
+        let selectedCondition = null;
+
+        function selectCondition(condition) {
+            // Hide all controls first
+            document.getElementById('co2Controls').style.display = 'none';
+            document.getElementById('temperatureControls').style.display = 'none';
+            document.getElementById('humidityControls').style.display = 'none';
+            document.getElementById('flowRateControls').style.display = 'none';
+
+            // Remove selected class from all cards
+            document.getElementById('co2Card').classList.remove('selected');
+            document.getElementById('temperatureCard').classList.remove('selected');
+            document.getElementById('humidityCard').classList.remove('selected');
+            document.getElementById('flowRateCard').classList.remove('selected');
+
+            if (selectedCondition === condition) {
+                selectedCondition = null;
+                return;
+            }
+
+            selectedCondition = condition;
+            document.getElementById(`${condition}Card`).classList.add('selected');
+            document.getElementById(`${condition}Controls`).style.display = 'block';
+        }
+
+        function updateCo2Value(value) {
+            const numericValue = parseFloat(value);
+            document.getElementById('co2Value').textContent = numericValue.toFixed(2);
+            currentState.conditions.co2Concentration = numericValue;
+            updateStep2Summary();
+        }
+
+        function updateTemperatureValue(value) {
+            const numericValue = parseFloat(value);
+            document.getElementById('temperatureValue').textContent = numericValue.toFixed(1);
+            currentState.conditions.temperature = numericValue;
+            updateStep2Summary();
+        }
+
+        function updateHumidityValue(value) {
+            const numericValue = parseInt(value);
+            document.getElementById('humidityValue').textContent = numericValue;
+            currentState.conditions.humidity = numericValue;
+            updateStep2Summary();
+        }
+
+        function updateFlowRateValue(value) {
+            const numericValue = parseFloat(value);
+            document.getElementById('flowRateValue').textContent = numericValue.toFixed(1);
+            currentState.conditions.flowRate = numericValue;
+            updateStep2Summary();
+        }
+
+        function updateStep2Summary() {
+            const finalCo2Elem = document.getElementById('finalCo2');
+            const finalTempElem = document.getElementById('finalTemperature');
+            const finalHumidityElem = document.getElementById('finalHumidity');
+            const finalFlowRateElem = document.getElementById('finalFlowRate');
+            const finalTestElem = document.getElementById('finalTestMethod');
+
+            if (finalCo2Elem) {
+                finalCo2Elem.textContent =
+                    `${currentState.conditions.co2Concentration.toFixed(2)} vol %`;
+            }
+            if (finalTempElem) {
+                finalTempElem.textContent =
+                    `${currentState.conditions.temperature.toFixed(1)} °C`;
+            }
+            if (finalHumidityElem) {
+                finalHumidityElem.textContent =
+                    `${currentState.conditions.humidity} %`;
+            }
+            if (finalFlowRateElem) {
+                finalFlowRateElem.textContent =
+                    `${currentState.conditions.flowRate.toFixed(1)} mL/min`;
+            }
+
+            // Update test method
+            const testMethodRadio = document.querySelector('input[name="testMethod"]:checked');
+            if (testMethodRadio) {
+                currentState.conditions.testMethod = testMethodRadio.value;
+                if (finalTestElem) {
+                    finalTestElem.textContent = testMethodRadio.value;
+                }
+            }
+        }
+
+        // Step 3 Functions
+        function updateStep3Summary() {
+            // Update the preview table with historical records
+            updateHistoricalRecordsTable();
+        }
+
+        function populateHistoricalForm() {
+            // Populate support dropdown
+            const supportSelect = document.getElementById('exp-support');
+            if (supportSelect) {
+                supportSelect.innerHTML = '<option value="">Select Support</option>';
+                DEFAULT_CONFIG.supports.forEach(support => {
+                    const option = document.createElement('option');
+                    option.value = support;
+                    option.textContent = support;
+                    supportSelect.appendChild(option);
+                });
+            }
+
+            // Populate amine1 dropdown
+            const amine1Select = document.getElementById('exp-amine1');
+            if (amine1Select) {
+                amine1Select.innerHTML = '<option value="">Select Amine/Additive</option>';
+                DEFAULT_CONFIG.amine1.forEach(amine => {
+                    const option = document.createElement('option');
+                    option.value = amine;
+                    option.textContent = amine;
+                    amine1Select.appendChild(option);
+                });
+            }
+
+            // Populate amine2 dropdown
+            const amine2Select = document.getElementById('exp-amine2');
+            if (amine2Select) {
+                amine2Select.innerHTML = '<option value="No">No</option>';
+                DEFAULT_CONFIG.amine2.forEach(amine => {
+                    if (amine !== "No") {
+                        const option = document.createElement('option');
+                        option.value = amine;
+                        option.textContent = amine;
+                        amine2Select.appendChild(option);
+                    }
+                });
+            }
+
+            // Populate additive3 dropdown
+            const additive3Select = document.getElementById('exp-additive3');
+            if (additive3Select) {
+                additive3Select.innerHTML = '<option value="No">No</option>';
+                DEFAULT_CONFIG.additive3.forEach(additive => {
+                    if (additive !== "No") {
+                        const option = document.createElement('option');
+                        option.value = additive;
+                        option.textContent = additive;
+                        additive3Select.appendChild(option);
+                    }
+                });
+            }
+        }
+
+        async function uploadHistoricalData() {
+            const fileInput = document.getElementById('historicalFile');
+            if (!fileInput.files[0]) {
+                showNotification('Please select a CSV file to upload', 'warning');
+                return;
+            }
+
+            showLoading();
+
+            try {
+                // Read and parse the CSV file
+                const file = fileInput.files[0];
+                const text = await file.text();
+                
+                // Simple CSV parsing (assuming first row is headers)
+                const lines = text.split('\n');
+                const headers = lines[0].split(',').map(header => header.trim());
+                
+                const records = [];
+                for (let i = 1; i < lines.length; i++) {
+                    if (lines[i].trim() === '') continue;
+                    
+                    const values = lines[i].split(',');
+                    const record = {};
+                    
+                    for (let j = 0; j < headers.length; j++) {
+                        if (j < values.length) {
+                            const value = values[j].trim();
+                            // Try to parse as number if possible
+                            record[headers[j]] = isNaN(value) ? value : parseFloat(value);
+                        }
+                    }
+                    
+                    records.push(record);
+                }
+
+                // Send the records to the backend API
+                const response = await fetch('/api/input-historical-records', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        experiments: records
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Update the historical records in the frontend state
+                    currentState.historicalRecords = [...currentState.historicalRecords, ...records];
+                    updateHistoricalRecordsTable();
+                    showNotification(`${result.added_count} historical records processed and added as training data`, 'success');
+                } else {
+                    showNotification(`Failed to process historical records: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                console.error('Error processing historical data:', error);
+                showNotification(`Error processing historical data: ${error.message}`, 'danger');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function submitHistoricalRecords() {
+            if (currentState.historicalRecords.length === 0) {
+                showNotification('No historical records to submit. Please add records first.', 'warning');
+                return;
+            }
+
+            showLoading();
+
+            try {
+                // Send the records to the backend API
+                const response = await fetch('/api/input-historical-records', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        experiments: currentState.historicalRecords
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showNotification(`${result.added_count} historical records successfully added as training data (${result.total_data_points} total data points)`, 'success');
+                } else {
+                    showNotification(`Failed to process historical records: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                console.error('Error submitting historical records:', error);
+                showNotification(`Error submitting historical records: ${error.message}`, 'danger');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function addIndividualRecord() {
+            const support = document.getElementById('exp-support').value;
+            const amine1 = document.getElementById('exp-amine1').value;
+            const amine2 = document.getElementById('exp-amine2').value;
+            const additive3 = document.getElementById('exp-additive3').value;
+            const mw = parseFloat(document.getElementById('exp-mw').value);
+            const oc = parseFloat(document.getElementById('exp-oc').value);
+            const capacity = parseFloat(document.getElementById('exp-capacity').value);
+
+            // Validate inputs
+            if (!support || !amine1 || isNaN(mw) || isNaN(oc) || isNaN(capacity)) {
+                showNotification('Please fill in all required fields with valid values', 'warning');
+                return;
+            }
+
+            // Create record object
+            const record = {
+                Support: support,
+                Amine_1_or_Additive_1: amine1,
+                Amine_2_or_Additive_2: amine2,
+                Amine_3_or_Additive_3: additive3,
+                MW_Mn_g_mol: mw,
+                Organic_Content_pct: oc,
+                CO2_Capacity_mmol_g: capacity
+            };
+
+            // Add to historical records
+            currentState.historicalRecords.push(record);
+
+            // Update UI
+            updateHistoricalRecordsTable();
+
+            // Reset form
+            document.getElementById('exp-support').value = '';
+            document.getElementById('exp-amine1').value = '';
+            document.getElementById('exp-amine2').value = 'No';
+            document.getElementById('exp-additive3').value = 'No';
+            document.getElementById('exp-mw').value = '';
+            document.getElementById('exp-oc').value = '';
+            document.getElementById('exp-capacity').value = '';
+
+            showNotification('Record added successfully!', 'success');
+        }
+
+        function updateHistoricalRecordsTable() {
+            const tbody = document.getElementById('historicalRecordsTable');
+            if (!tbody) return;
+
+            if (currentState.historicalRecords.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No records uploaded yet</td></tr>';
+                return;
+            }
+
+            let html = '';
+            currentState.historicalRecords.forEach((record, index) => {
+                html += `
+                    <tr>
+                        <td>${record.Support}</td>
+                        <td>${record.Amine_1_or_Additive_1}</td>
+                        <td>${record.Amine_2_or_Additive_2}</td>
+                        <td>${record.Amine_3_or_Additive_3}</td>
+                        <td>${record.MW_Mn_g_mol}</td>
+                        <td>${record.Organic_Content_pct}%</td>
+                        <td>${record.CO2_Capacity_mmol_g.toFixed(4)}</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" onclick="removeHistoricalRecord(${index})">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        function removeHistoricalRecord(index) {
+            currentState.historicalRecords.splice(index, 1);
+            updateHistoricalRecordsTable();
+            showNotification('Record removed successfully!', 'info');
+        }
+
+        // Initialize System via API
+        async function initializeSystem() {
+            // Validate selections
+            if (currentState.searchBounds.supports.length === 0) {
+                showNotification('Please select at least one support material', 'warning');
+                return;
+            }
+
+            if (currentState.searchBounds.amine1.length === 0) {
+                showNotification('Please select at least one amine/additive for Amine 1', 'warning');
+                return;
+            }
+
+            if (currentState.searchBounds.amine2.length === 0) {
+                showNotification('Please select at least one amine/additive for Amine 2', 'warning');
+                return;
+            }
+
+            if (currentState.searchBounds.additive3.length === 0) {
+                showNotification('Please select at least one additive for Additive 3', 'warning');
+                return;
+            }
+
+            showLoading();
+
+            try {
+                // First, if we have historical records, send them separately to the historical records endpoint
+                if (currentState.historicalRecords.length > 0) {
+                    const historicalResponse = await fetch('/api/input-historical-records', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            experiments: currentState.historicalRecords
+                        })
+                    });
+
+                    const historicalResult = await historicalResponse.json();
+                    
+                    if (!historicalResult.success) {
+                        showNotification(`Failed to process historical records: ${historicalResult.error}`, 'danger');
+                        hideLoading();
+                        return;
+                    }
+                }
+
+                // Prepare data for API (without historical records since they're already sent)
+                const initData = {
+                    searchBounds: currentState.searchBounds,
+                    conditions: currentState.conditions
+                };
+
+                console.log("Sending initialization data:", initData);
+
+                const response = await fetch('/api/init', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(initData)
+                });
+
+                const result = await response.json();
+                console.log("Initialization response:", result);
+
+                if (result.success) {
+                    // Update system status
+                    document.getElementById('systemStatusBadge').textContent = 'Ready';
+                    document.getElementById('systemStatusBadge').className = 'badge bg-success';
+
+                    // Update best capacity
+                    if (result.best_capacity) {
+                        currentState.optimization.bestCapacity = parseFloat(result.best_capacity);
+                        // Safely update UI elements
+                        const modelAccuracyElem = document.getElementById('modelAccuracy');
+                        if (modelAccuracyElem) {
+                            modelAccuracyElem.textContent = parseFloat(result.best_capacity).toFixed(4);
+                        }
+                    }
+
+                    // Update training points
+                    if (result.data_points) {
+                        const trainingPointsElem = document.getElementById('trainingPoints');
+                        if (trainingPointsElem) {
+                            trainingPointsElem.textContent = result.data_points;
+                        }
+                        currentState.optimization.totalDataPoints = result.data_points;
+                    }
+
+                    // Store conditions
+                    if (result.conditions) {
+                        // Map backend conditions to frontend format
+                        const conditionMapping = {
+                            'CO2_Concentration_vol_pct': 'co2Concentration',
+                            'Adsorption_Temperature_C': 'temperature',
+                            'Relative_Humidity_pct': 'humidity',
+                            'Flow_Rate_mL_min': 'flowRate',
+                            'CO2_Test_Method': 'testMethod'
+                        };
+
+                        for (const [backendKey, value] of Object.entries(result.conditions)) {
+                            if (backendKey in conditionMapping) {
+                                const frontendKey = conditionMapping[backendKey];
+                                currentState.conditions[frontendKey] = value;
+                            }
+                        }
+                    }
+
+                    // Go to step 4
+                    goToStep(4);
+
+                    showNotification('Optimization system initialized successfully with historical training data!', 'success');
+                } else {
+                    showNotification(`Failed to initialize system: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                console.error("Initialization error:", error);
+                showNotification(`Error initializing system: ${error.message}`, 'danger');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Step 4 Functions
+        function updateStep4Summary() {
+            // Update optimization status
+            updateOptimizationStatus();
+        }
+
+        function updateOptimizationStatus() {
+            const bestCapacityElem = document.getElementById('bestCapacity');
+            const realExperimentsElem = document.getElementById('realExperiments');
+            const modelAccuracyElem = document.getElementById('modelAccuracy');
+            const expectedImprovementElem = document.getElementById('expectedImprovement');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+
+            if (bestCapacityElem) {
+                bestCapacityElem.textContent = currentState.optimization.bestCapacity.toFixed(4);
+            }
+            if (realExperimentsElem) {
+                realExperimentsElem.textContent = currentState.optimization.realExperiments;
+            }
+            if (modelAccuracyElem) {
+                modelAccuracyElem.textContent = currentState.optimization.bestCapacity.toFixed(4);
+            }
+            if (expectedImprovementElem) {
+                expectedImprovementElem.textContent = currentState.optimization.realExperiments;
+            }
+            if (progressBar) {
+                const progress = Math.min(currentState.optimization.iteration * 20, 100);
+                progressBar.style.width = `${progress}%`;
+            }
+            if (progressText) {
+                progressText.textContent = `Iteration ${currentState.optimization.iteration}`;
+            }
+        }
+
+        // Load system status from API
+        async function loadSystemStatus() {
+            try {
+                const response = await fetch('/api/get-status');
+                const result = await response.json();
+
+                if (result.success) {
+                    // Update optimization state
+                    currentState.optimization.iteration = result.iteration || 0;
+                    currentState.optimization.bestCapacity = parseFloat(result.best_capacity) || 0.0;
+                    currentState.optimization.realExperiments = result.total_experiments || 0;
+                    currentState.optimization.totalDataPoints = result.total_data_points || 0;
+
+                    // Update search bounds if available, merging with defaults
+                    if (result.search_bounds) {
+                        // Preserve existing values and only update with new ones
+                        Object.assign(currentState.searchBounds, result.search_bounds);
+
+                        // Ensure required properties exist with defaults if not provided
+                        if (!currentState.searchBounds.supports || currentState.searchBounds.supports.length === 0) {
+                            currentState.searchBounds.supports = DEFAULT_CONFIG.supports.slice(0, 3);
+                        }
+                        if (!currentState.searchBounds.amine1 || currentState.searchBounds.amine1.length === 0) {
+                            currentState.searchBounds.amine1 = DEFAULT_CONFIG.amine1.slice(0, 3);
+                        }
+                        if (!currentState.searchBounds.amine2 || currentState.searchBounds.amine2.length === 0) {
+                            currentState.searchBounds.amine2 = DEFAULT_CONFIG.amine2.slice(0, 5);
+                        }
+                        if (!currentState.searchBounds.additive3 || currentState.searchBounds.additive3.length === 0) {
+                            currentState.searchBounds.additive3 = DEFAULT_CONFIG.additive3;
+                        }
+                        if (!currentState.searchBounds.mwRange) {
+                            currentState.searchBounds.mwRange = [0, 10000];
+                        }
+                        if (!currentState.searchBounds.ocRange) {
+                            currentState.searchBounds.ocRange = [0, 100];
+                        }
+                    }
+
+                    // Update conditions if available
+                    if (result.conditions) {
+                        // Map backend conditions to frontend format
+                        const conditionMapping = {
+                            'CO2_Concentration_vol_pct': 'co2Concentration',
+                            'Adsorption_Temperature_C': 'temperature',
+                            'Relative_Humidity_pct': 'humidity',
+                            'Flow_Rate_mL_min': 'flowRate',
+                            'CO2_Test_Method': 'testMethod'
+                        };
+
+                        for (const [backendKey, value] of Object.entries(result.conditions)) {
+                            if (backendKey in conditionMapping) {
+                                const frontendKey = conditionMapping[backendKey];
+                                currentState.conditions[frontendKey] = value;
+                            }
+                        }
+                    }
+
+                    // Safely update UI elements
+                    const modelAccuracyElem = document.getElementById('modelAccuracy');
+                    const expectedImprovementElem = document.getElementById('expectedImprovement');
+                    const trainingPointsElem = document.getElementById('trainingPoints');
+                    const modelFitElem = document.getElementById('modelFit');
+                    const systemStatusBadge = document.getElementById('systemStatusBadge');
+
+                    if (modelAccuracyElem) {
+                        modelAccuracyElem.textContent = currentState.optimization.bestCapacity.toFixed(4);
+                    }
+                    if (expectedImprovementElem) {
+                        expectedImprovementElem.textContent = currentState.optimization.realExperiments;
+                    }
+                    if (trainingPointsElem) {
+                        trainingPointsElem.textContent = currentState.optimization.totalDataPoints;
+                    }
+                    if (modelFitElem) {
+                        modelFitElem.textContent = currentState.optimization.totalDataPoints > 0 ? 'Fitted' : 'Not fitted';
+                    }
+                    if (systemStatusBadge && result.total_data_points > 0) {
+                        systemStatusBadge.textContent = 'Ready';
+                        systemStatusBadge.className = 'badge bg-success';
+                    }
+
+                    // Update optimization status
+                    updateOptimizationStatus();
+                }
+            } catch (error) {
+                console.error('Error loading system status:', error);
+            }
+        }
+
+        // Display top candidate
+        function displayTopCandidate(candidates) {
+            const container = document.getElementById('candidatesContainer');
+
+            // Check if container exists before trying to set its innerHTML
+            if (!container) {
+                console.error('Error: candidatesContainer element not found in the DOM');
+                return;
+            }
+
+            if (!candidates || candidates.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-muted p-5">
+                        <i class="bi bi-award display-6"></i>
+                        <p class="mt-3">No candidate generated yet.<br>Click "Generate Top Candidate" to start.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Create a table for the candidates
+            let html = `
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Rank</th>
+                                <th>Support</th>
+                                <th>Amine 1</th>
+                                <th>Amine 2</th>
+                                <th>Additive 3</th>
+                                <th>MW (g/mol)</th>
+                                <th>Org. Content (%)</th>
+                                <th>Pred. Cap. (mmol/g)</th>
+                                <th>Exp. Imp.</th>
+                                <th>Uncertainty</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            // Display all top candidates (up to 5)
+            candidates.forEach((candidate, index) => {
+                const isBest = index === 0;
+                const predictedCapacity = candidate.predictedCapacity || candidate.Predicted_CO2_Capacity_mmol_g || 0;
+                const mwValue = candidate.mw || candidate.MW_Mn_g_mol || 0;
+                const organicContent = candidate.organicContent || candidate.Organic_Content_pct || 0;
+                const amine3 = candidate.Amine_3_or_Additive_3 || 'Unknown';
+                const conditions = candidate.conditions || currentState.conditions;
+                const uncertainty = candidate.Uncertainty || 0;
+                const expectedImprovement = candidate.Expected_Improvement || 0;
+
+                html += `
+                    <tr ${isBest ? 'class="table-success"' : ''}>
+                        <td><strong>${index + 1}${isBest ? ' <span class="badge bg-success">Best</span>' : ''}</strong></td>
+                        <td>${candidate.Support || 'Unknown'}</td>
+                        <td>${candidate.Amine_1_or_Additive_1 || 'Unknown'}</td>
+                        <td>${candidate.Amine_2_or_Additive_2 || 'Unknown'}</td>
+                        <td>${amine3}</td>
+                        <td>${mwValue.toLocaleString()}</td>
+                        <td>${organicContent.toFixed(1)}%</td>
+                        <td><strong>${parseFloat(predictedCapacity).toFixed(4)}</strong></td>
+                        <td>${expectedImprovement.toFixed(4)}</td>
+                        <td>${uncertainty.toFixed(4)}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-success" title="Input experimental results for this candidate" onclick="openRecordExperiment(${index})">
+                                <i class="bi bi-plus-circle"></i> Input
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+
+            container.innerHTML = html;
+        }
+
+        // Generate candidates via API
+        async function generateCandidates() {
+            showLoading();
+
+            try {
+                const response = await fetch('/api/generate-candidates', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ n_candidates: 5 }) // Request top 5
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Store candidates
+                    currentState.optimization.currentCandidates = result.candidates;
+                    currentState.optimization.iteration = result.iteration;
+                    currentState.optimization.bestCapacity = parseFloat(result.best_capacity);
+
+                    // Display all top 5 candidates
+                    if (result.candidates && result.candidates.length > 0) {
+                        displayTopCandidate(result.candidates);
+                    }
+
+                    const candidateCountElem = document.getElementById('candidateCount');
+                    if (candidateCountElem) {
+                        candidateCountElem.textContent = `${result.candidates.length} Candidates`;
+                    }
+
+                    // Update status
+                    updateOptimizationStatus();
+
+                    const modelAccuracyElem = document.getElementById('modelAccuracy');
+                    if (modelAccuracyElem) {
+                        modelAccuracyElem.textContent = currentState.optimization.bestCapacity.toFixed(4);
+                    }
+
+                    showNotification(`Generated ${result.candidates.length} top candidates`, 'info');
+                } else {
+                    showNotification(`Failed to generate candidates: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                showNotification(`Error generating candidates: ${error.message}`, 'danger');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Experiment recording functions
+        function recordExperiment() {
+            if (currentState.optimization.currentCandidates.length === 0) {
+                showNotification('Please generate candidates first', 'warning');
+                return;
+            }
+            openRecordExperiment(0);
+        }
+
+        function openRecordExperiment(candidateIndex) {
+            const modal = new bootstrap.Modal(document.getElementById('recordExperimentModal'));
+            const content = document.getElementById('recordExperimentContent');
+
+            // Check if content element exists before trying to set its innerHTML
+            if (!content) {
+                console.error('Error: recordExperimentContent element not found in the DOM');
+                return;
+            }
+
+            const candidate = currentState.optimization.currentCandidates[candidateIndex];
+
+            // Use correct property names with fallbacks
+            const predictedCapacity = candidate.predictedCapacity || candidate.Predicted_CO2_Capacity_mmol_g || 0;
+            const mwValue = candidate.mw || candidate.MW_Mn_g_mol || 0;
+            const organicContent = candidate.organicContent || candidate.Organic_Content_pct || 0;
+            const amine3 = candidate.Amine_3_or_Additive_3 || 'Unknown';
+
+            content.innerHTML = `
+                <div class="mb-3">
+                    <h5>Input Your Experimental Results</h5>
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <div class="text-end">
+                            <div class="capacity-value">${parseFloat(predictedCapacity).toFixed(4)} mmol/g</div>
+                            <small class="text-muted">Predicted value</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <h6>Candidate Configuration</h6>
+                    <div class="row small">
+                        <div class="col-6">
+                            <strong>Support:</strong> ${candidate.Support || 'Unknown'}
+                        </div>
+                        <div class="col-6">
+                            <strong>MW:</strong> ${mwValue.toLocaleString()} g/mol
+                        </div>
+                        <div class="col-4">
+                            <strong>Amine 1:</strong> ${candidate.Amine_1_or_Additive_1 || 'Unknown'}
+                        </div>
+                        <div class="col-4">
+                            <strong>Amine 2:</strong> ${candidate.Amine_2_or_Additive_2 || 'Unknown'}
+                        </div>
+                        <div class="col-4">
+                            <strong>Additive 3:</strong> ${amine3}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <h6>Model Prediction</h6>
+                    <div class="row">
+                        <div class="col-6">
+                            <div class="text-center p-2 border rounded">
+                                <div class="metric-value">${parseFloat(predictedCapacity).toFixed(4)}</div>
+                                <div class="metric-label">Predicted Capacity</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Measured CO₂ Capacity (mmol/g)</label>
+                    <input type="number" class="form-control" id="actualCapacity"
+                           step="0.0001" min="0" value="${predictedCapacity}" placeholder="Enter your measured value">
+                    <small class="form-text text-muted">Enter the CO₂ capacity you measured in your experiment</small>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Experimental Notes</label>
+                    <textarea class="form-control" id="experimentNotes" rows="3"
+                              placeholder="Any observations, deviations from protocol, or special conditions..."></textarea>
+                </div>
+
+                <div class="alert alert-info">
+                    <small>
+                        <i class="bi bi-info-circle me-1"></i>
+                        <strong>Tip:</strong> Enter your measured CO₂ capacity from your experiment. This data will be used to update the model and improve future recommendations.
+                    </small>
+                </div>
+
+                <div class="text-end">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success" onclick="submitExperiment(${candidateIndex})">
+                        Submit Results & Update Model
+                    </button>
+                </div>
+            `;
+
+            modal.show();
+        }
+
+        async function submitExperiment(candidateIndex) {
+            const candidate = currentState.optimization.currentCandidates[candidateIndex];
+            const actualCapacity = parseFloat(document.getElementById('actualCapacity').value);
+            const notes = document.getElementById('experimentNotes').value;
+
+            if (isNaN(actualCapacity) || actualCapacity < 0) {
+                showNotification('Please enter a valid capacity value', 'danger');
+                return;
+            }
+
+            showLoading();
+
+            try {
+                const response = await fetch('/api/record-experiment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        candidate_id: candidateIndex,
+                        actual_capacity: actualCapacity,
+                        notes: notes
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    // Update best capacity
+                    if (actualCapacity > currentState.optimization.bestCapacity) {
+                        currentState.optimization.bestCapacity = actualCapacity;
+                        showNotification(`New best capacity: ${actualCapacity.toFixed(4)} mmol/g!`, 'success');
+                        updateBestResult();
+                    }
+
+                    // Update experiment count
+                    currentState.optimization.realExperiments = result.total_experiments;
+
+                    // Safely update UI elements
+                    const expectedImprovementElem = document.getElementById('expectedImprovement');
+                    const modelAccuracyElem = document.getElementById('modelAccuracy');
+
+                    if (expectedImprovementElem) {
+                        expectedImprovementElem.textContent = currentState.optimization.realExperiments;
+                    }
+                    if (modelAccuracyElem) {
+                        modelAccuracyElem.textContent = currentState.optimization.bestCapacity.toFixed(4);
+                    }
+
+                    // Update optimization status
+                    updateOptimizationStatus();
+
+                    // Load updated status
+                    await loadSystemStatus();
+
+                    // Close modal
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('recordExperimentModal'));
+                    if (modal) {
+                        modal.hide();
+                    }
+
+                    // Calculate prediction error
+                    const predictedCapacity = candidate.predictedCapacity || candidate.Predicted_CO2_Capacity_mmol_g || 0;
+                    const error = Math.abs(actualCapacity - parseFloat(predictedCapacity));
+                    showNotification(`Experiment recorded. Prediction error: ${error.toFixed(4)} mmol/g`, 'success');
+                } else {
+                    showNotification(`Failed to record experiment: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                showNotification(`Error recording experiment: ${error.message}`, 'danger');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function updateBestResult() {
+            const card = document.getElementById('bestResultCard');
+            const content = document.getElementById('bestResultContent');
+
+            if (!card || !content) return;
+
+            if (currentState.optimization.bestCapacity === 0) {
+                card.style.display = 'none';
+                return;
+            }
+
+            card.style.display = 'block';
+
+            // Find the best candidate from current candidates
+            if (currentState.optimization.currentCandidates.length > 0) {
+                const bestCandidate = currentState.optimization.currentCandidates
+                    .reduce((best, current) => {
+                        const currentPredicted = current.predictedCapacity || current.Predicted_CO2_Capacity_mmol_g || 0;
+                        const bestPredicted = best.predictedCapacity || best.Predicted_CO2_Capacity_mmol_g || 0;
+                        return parseFloat(currentPredicted) > parseFloat(bestPredicted) ? current : best;
+                    }, { predictedCapacity: 0, Predicted_CO2_Capacity_mmol_g: 0 });
+
+                const predictedCapacity = bestCandidate.predictedCapacity || bestCandidate.Predicted_CO2_Capacity_mmol_g || 0;
+                const mwValue = bestCandidate.mw || bestCandidate.MW_Mn_g_mol || 0;
+                const organicContent = bestCandidate.organicContent || bestCandidate.Organic_Content_pct || 0;
+                const amine3 = bestCandidate.Amine_3_or_Additive_3 || 'Unknown';
+
+                if (parseFloat(predictedCapacity) > 0) {
+                    content.innerHTML = `
+                        <div class="text-center">
+                            <h4 class="text-success">${parseFloat(predictedCapacity).toFixed(4)} mmol/g</h4>
+                            <div class="small text-muted">
+                                <div>${bestCandidate.Support || 'Unknown'}</div>
+                                <div>${bestCandidate.Amine_1_or_Additive_1 || 'Unknown'}, ${bestCandidate.Amine_2_or_Additive_2 || 'Unknown'}, ${amine3}</div>
+                                <div>MW: ${mwValue.toLocaleString()} g/mol</div>
+                                <div>Organic: ${organicContent}%</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // Utility functions
+        async function exportData() {
+            try {
+                const response = await fetch('/api/export-data');
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `dac_optimization_${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+
+                    showNotification('Data exported successfully', 'info');
+                } else {
+                    showNotification('Failed to export data', 'danger');
+                }
+            } catch (error) {
+                showNotification(`Error exporting data: ${error.message}`, 'danger');
+            }
+        }
+
+        function restartSetup() {
+            if (confirm('Are you sure you want to restart? Current optimization progress will be lost.')) {
+                // Reset optimization state
+                currentState.optimization = {
+                    iteration: 0,
+                    bestCapacity: 0.0,
+                    realExperiments: 0,
+                    totalDataPoints: 0,
+                    currentCandidates: [],
+                    experimentHistory: []
+                };
+                
+                // Reset historical records
+                currentState.historicalRecords = [];
+
+                // Clear UI elements
+                const candidatesContainer = document.getElementById('candidatesContainer');
+                const bestResultCard = document.getElementById('bestResultCard');
+                const predictionAccuracy = document.getElementById('predictionAccuracy');
+                const historicalRecordsTable = document.getElementById('historicalRecordsTable');
+
+                if (candidatesContainer) {
+                    candidatesContainer.innerHTML = `
+                        <div class="text-center text-muted p-4">
+                            <i class="bi bi-graph-up display-6"></i>
+                            <p class="mt-3">Generate candidates to see details</p>
+                        </div>
+                    `;
+                }
+
+                if (bestResultCard) {
+                    bestResultCard.style.display = 'none';
+                }
+
+                if (predictionAccuracy) {
+                    predictionAccuracy.innerHTML = '<div class="text-center text-muted p-4">No experiments yet</div>';
+                }
+
+                if (historicalRecordsTable) {
+                    historicalRecordsTable.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No records uploaded yet</td></tr>';
+                }
+
+                // Clear chart image
+                const chartImg = document.getElementById('optimizationChartImg');
+                if (chartImg) {
+                    chartImg.src = '';
+                }
+
+                // Reset to step 1
+                goToStep(1);
+                showNotification('Restarted setup. All data has been reset.', 'info');
+            }
+        }
+
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            const messageEl = document.getElementById('notificationMessage');
+
+            if (!notification || !messageEl) return;
+
+            messageEl.textContent = message;
+            notification.style.display = 'block';
+
+            setTimeout(hideNotification, 5000);
+        }
+
+        function hideNotification() {
+            const notification = document.getElementById('notification');
+            if (notification) {
+                notification.style.display = 'none';
+            }
+        }
+
+        function showLoading() {
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            if (loadingOverlay) {
+                loadingOverlay.style.display = 'flex';
+            }
+        }
+
+        function hideLoading() {
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            if (loadingOverlay) {
+                loadingOverlay.style.display = 'none';
+            }
+        }
+
+        // Update the optimization chart image
+        function updateOptimizationChart() {
+            // Fetch the latest optimization chart from the server
+            fetch('/api/generate-chart')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.chart_data) {
+                        const imgElement = document.getElementById('optimizationChartImg');
+                        if (imgElement) {
+                            imgElement.src = data.chart_data;
+                        }
+                    } else {
+                        console.error('Error fetching chart:', data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching optimization chart:', error);
+                });
+        }
+
+        // Helper function to generate mock chart data for demonstration
+        function generateMockChartData() {
+            const data = [];
+            const baseCapacity = 1.5;
+
+            for (let i = 0; i < 8; i++) {
+                const iteration = currentState.optimization.iteration - (7 - i);
+                const iterationOffset = Math.max(0, iteration);
+
+                // Simulate improvement trend with some noise
+                const improvement = 0.2 * (i + 1) * Math.random();
+                const noise = (Math.random() - 0.5) * 0.1;
+                const capacity = baseCapacity + improvement + noise;
+
+                data.push({
+                    iteration: iterationOffset + 1,
+                    current_best: Math.max(baseCapacity, capacity),
+                    current_value: capacity
+                });
+            }
+
+            return data;
+        }
+
+        // Populate experimental form in optimization section
+        async function populateExperimentalForm() {
+            // Always populate selects with full DEFAULT_CONFIG lists first
+            // Support materials
+            const supportsSelect = document.getElementById('exp-support-opt');
+            if (supportsSelect) {
+                supportsSelect.innerHTML = '<option value="">Select Support</option>';
+                DEFAULT_CONFIG.supports.forEach(support => {
+                    const option = document.createElement('option');
+                    option.value = support;
+                    option.textContent = support;
+                    supportsSelect.appendChild(option);
+                });
+            }
+
+            // Amine 1 / Additive 1
+            const amine1Select = document.getElementById('exp-amine1-opt');
+            if (amine1Select) {
+                amine1Select.innerHTML = '<option value="">Select Amine/Additive</option>';
+                DEFAULT_CONFIG.amine1.forEach(amine => {
+                    const option = document.createElement('option');
+                    option.value = amine;
+                    option.textContent = amine;
+                    amine1Select.appendChild(option);
+                });
+            }
+
+            // Amine 2 / Additive 2
+            const amine2Select = document.getElementById('exp-amine2-opt');
+            if (amine2Select) {
+                amine2Select.innerHTML = '<option value="No">No</option>';
+                DEFAULT_CONFIG.amine2.forEach(amine => {
+                    if (amine !== "No") {
+                        const option = document.createElement('option');
+                        option.value = amine;
+                        option.textContent = amine;
+                        amine2Select.appendChild(option);
+                    }
+                });
+            }
+
+            // Amine 3 / Additive 3
+            const additive3Select = document.getElementById('exp-additive3-opt');
+            if (additive3Select) {
+                additive3Select.innerHTML = '<option value="No">No</option>';
+                DEFAULT_CONFIG.additive3.forEach(additive => {
+                    if (additive !== "No") {
+                        const option = document.createElement('option');
+                        option.value = additive;
+                        option.textContent = additive;
+                        additive3Select.appendChild(option);
+                    }
+                });
+            }
+
+            // Now try to fetch server status to update numeric ranges and condition values
+            try {
+                const response = await fetch('/api/get-status');
+                const status = await response.json();
+
+                if (status.success) {
+                    // Set MW range based on current bounds
+                    const mwInput = document.getElementById('exp-mw-opt');
+                    if (mwInput && status.bounds && status.bounds.mwRange && Array.isArray(status.bounds.mwRange)) {
+                        const [min, max] = status.bounds.mwRange;
+                        mwInput.min = min;
+                        mwInput.max = max;
+                        if (!mwInput.value) mwInput.value = min;
+                    }
+
+                    // Set OC range based on current bounds
+                    const ocInput = document.getElementById('exp-oc-opt');
+                    if (ocInput && status.bounds && status.bounds.ocRange && Array.isArray(status.bounds.ocRange)) {
+                        const [min, max] = status.bounds.ocRange;
+                        ocInput.min = min;
+                        ocInput.max = max;
+                        if (!ocInput.value) ocInput.value = min;
+                    }
+
+                    // Set condition values
+                    const tempInput = document.getElementById('exp-temp-opt');
+                    if (tempInput && status.conditions) {
+                        tempInput.value = status.conditions.temperature || 25.0;
+                    }
+                    const humidityInput = document.getElementById('exp-humidity-opt');
+                    if (humidityInput && status.conditions) {
+                        humidityInput.value = status.conditions.humidity || 0.0;
+                    }
+                    const co2Input = document.getElementById('exp-co2-conc-opt');
+                    if (co2Input && status.conditions) {
+                        co2Input.value = status.conditions.co2Concentration || 0.04;
+                    }
+                    const flowRateInput = document.getElementById('exp-flow-rate-opt');
+                    if (flowRateInput && status.conditions) {
+                        flowRateInput.value = status.conditions.flowRate || 100.0;
+                    }
+                }
+            } catch (error) {
+                console.error("Error fetching search bounds:", error);
+                // Not critical, form already populated with defaults
+            }
+        }
+
+        // Function to submit custom experimental data
+        async function submitCustomExperimentalData() {
+            // Get form values
+            const support = document.getElementById('exp-support-opt').value;
+            const amine1 = document.getElementById('exp-amine1-opt').value;
+            const amine2 = document.getElementById('exp-amine2-opt').value;
+            const additive3 = document.getElementById('exp-additive3-opt').value;
+            const mwStr = document.getElementById('exp-mw-opt').value;
+            const ocStr = document.getElementById('exp-oc-opt').value;
+            const capacityStr = document.getElementById('exp-capacity-opt').value;
+            const notes = document.getElementById('exp-notes-opt').value;
+            const tempStr = document.getElementById('exp-temp-opt').value;
+            const humidityStr = document.getElementById('exp-humidity-opt').value;
+            const co2ConcStr = document.getElementById('exp-co2-conc-opt').value;
+            const flowRateStr = document.getElementById('exp-flow-rate-opt').value;
+            const testMethod = document.getElementById('exp-test-method-opt').value;
+
+            // Validate inputs
+            if (!support || !amine1 || !mwStr || !ocStr || !capacityStr) {
+                showNotification('Please fill in all required fields', 'danger');
+                return;
+            }
+
+            // Parse numeric values
+            const mw = parseFloat(mwStr);
+            const oc = parseFloat(ocStr);
+            const capacity = parseFloat(capacityStr);
+            const temp = parseFloat(tempStr);
+            const humidity = parseFloat(humidityStr);
+            const co2Conc = parseFloat(co2ConcStr);
+            const flowRate = parseFloat(flowRateStr);
+
+            // Validate parsed numbers
+            if (isNaN(mw) || isNaN(oc) || isNaN(capacity)) {
+                showNotification('Please enter valid numeric values for MW, Organic Content, and Capacity', 'danger');
+                return;
+            }
+
+            // Create experimental data object
+            const experimentalData = {
+                experiments: [{
+                    Support: support,
+                    "Amine_1_or_Additive_1": amine1,
+                    "Amine_2_or_Additive_2": amine2,
+                    "Amine_3_or_Additive_3": additive3,
+                    "MW_Mn_g_mol": mw,
+                    "Organic_Content_pct": oc,
+                    "CO2_Capacity_mmol_g": capacity,
+                    "Temperature": temp,
+                    "Humidity": humidity,
+                    "CO2_Concentration": co2Conc,
+                    "Flow_Rate": flowRate,
+                    "Test_Method": testMethod,
+                    "Notes": notes
+                }]
+            };
+
+            showLoading();
+
+            try {
+                // Send the experimental data to the server
+                const response = await fetch('/api/input-custom-experimental-results', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(experimentalData)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showNotification(`Experimental data submitted successfully: ${result.message}`, 'success');
+
+                    // Reset form
+                    document.getElementById('exp-support-opt').value = '';
+                    document.getElementById('exp-amine1-opt').value = '';
+                    document.getElementById('exp-amine2-opt').value = 'No';
+                    document.getElementById('exp-additive3-opt').value = 'No';
+                    document.getElementById('exp-mw-opt').value = '';
+                    document.getElementById('exp-oc-opt').value = '';
+                    document.getElementById('exp-capacity-opt').value = '';
+                    document.getElementById('exp-notes-opt').value = '';
+                    // Keep condition values as they are
+
+                    // Refresh the optimization chart
+                    setTimeout(refreshOptimizationChart, 1000);
+                } else {
+                    showNotification(`Failed to submit experimental data: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                console.error("Error submitting experimental data:", error);
+                showNotification(`Error submitting experimental data: ${error.message}`, 'danger');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Update the form when the step changes to step 4
+        // Note: originalGoToStep is already declared at the top
+        goToStep = function(stepNum) {
+            originalGoToStep(stepNum);
+            if (stepNum === 4) {
+                setTimeout(populateExperimentalForm, 100);
+            }
+        };
+
+        // Also populate the form when the page loads if we're already on step 4
+        if (currentState.step === 4) {
+            setTimeout(populateExperimentalForm, 100);
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeMultiSelect();
+            updateStep1Summary(); // Update the summary when the page loads
+
+            // Set up test method change listener
+            document.querySelectorAll('input[name="testMethod"]').forEach(radio => {
+                radio.addEventListener('change', updateStep2Summary);
+            });
+
+            // Initialize chart
+            setTimeout(() => {
+                if (document.getElementById('optimizationChartImg')) {
+                    // Load initial chart after a short delay
+                    setTimeout(() => {
+                        if (currentState.step === 4) {
+                            updateOptimizationChart();
+                        }
+                    }, 1000);
+                }
+            }, 500);
+
+            // Initialize with some sample data for demonstration
+            currentState.optimization.totalDataPoints = 150;
+            updateStep1Summary();
+            updateStep2Summary();
+
+            showNotification('DAC Material Optimizer ready. Complete Steps 1-3 to begin optimization.', 'info');
+        });
+
+        function refreshChartOnStep4() {
+            if (currentState.step === 4) {
+                updateOptimizationChart();
+            }
+        }
+        
+        // Update chart after generating candidates or recording experiments
+        async function refreshOptimizationChart() {
+            if (currentState.step === 4) {
+                await updateOptimizationChart();
+            }
+        }
+
+        // Call chart update after successful operations
+        const originalGenerateCandidates = generateCandidates;
+        generateCandidates = async function() {
+            await originalGenerateCandidates();
+            setTimeout(refreshOptimizationChart, 1000); // Delay to allow data to be processed
+        };
+
+        const originalSubmitExperiment = submitExperiment;
+        submitExperiment = async function(candidateIndex) {
+            await originalSubmitExperiment(candidateIndex);
+            setTimeout(refreshOptimizationChart, 1000); // Delay to allow data to be processed
+        };
+    </script>
+</body>
+</html>
