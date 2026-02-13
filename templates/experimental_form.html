@@ -241,9 +241,8 @@
 
     <script>
         document.getElementById('experimentalForm').addEventListener('submit', async function(e) {
-            e.preventDefault(); // Prevent default form submission
-            
-            // Get form values
+            e.preventDefault();
+
             const formData = {
                 experiments: [{
                     Support: document.getElementById('support').value,
@@ -261,32 +260,26 @@
                     "Notes": document.getElementById('notes').value
                 }]
             };
-            
-            // Validate required fields
-            if (!formData.experiments[0].Support || !formData.experiments[0]["Amine_1_or_Additive_1"] || 
-                !formData.experiments[0]["MW_Mn_g_mol"] || !formData.experiments[0]["Organic_Content_pct"] || 
+
+            if (!formData.experiments[0].Support || !formData.experiments[0]["Amine_1_or_Additive_1"] ||
+                !formData.experiments[0]["MW_Mn_g_mol"] || !formData.experiments[0]["Organic_Content_pct"] ||
                 !formData.experiments[0]["CO2_Capacity_mmol_g"]) {
                 alert('Please fill in all required fields.');
                 return;
             }
-            
+
             try {
-                // Submit to the backend API
                 const response = await fetch('/api/input-custom-experimental-results', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(formData)
                 });
 
                 const result = await response.json();
-                
+
                 if (result.success) {
                     alert(`Success: ${result.message}`);
                     document.getElementById('experimentalForm').reset();
-                    
-                    // Reset default values
                     document.getElementById('temperature').value = '25.0';
                     document.getElementById('humidity').value = '0.0';
                     document.getElementById('co2Concentration').value = '0.04';

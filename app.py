@@ -35,6 +35,7 @@ optimizer = None
 current_state = {
     'iteration': 0,
     'best_capacity': 0.0,
+    'best_experiment': None,           # NEW: store best experiment details
     'real_experiments': [],
     'current_candidates': [],
     'conditions': {
@@ -44,7 +45,7 @@ current_state = {
         'Adsorption_Temperature_C': 25.0,
         'CO2_Test_Method': 'TGA'
     },
-    'search_bounds': {}  # Added to store search bounds
+    'search_bounds': {}
 }
 
 
@@ -140,7 +141,6 @@ def initialize_system():
             conditions = data['conditions']
             app.logger.info(f"Conditions from frontend: {conditions}")
 
-            # Transform frontend condition names to backend names
             condition_mapping = {
                 'co2Concentration': 'CO2_Concentration_vol_pct',
                 'temperature': 'Adsorption_Temperature_C',
@@ -180,11 +180,6 @@ def initialize_system():
             app.logger.info(f"Optimizer initialized successfully")
             app.logger.info(f"Training data size: {len(optimizer.bo_system.train_X)}")
 
-            # MODIFIED: Warn if less than 5 data points, but continue
-            if len(optimizer.bo_system.train_X) < 5:
-                app.logger.warning(f"Only {len(optimizer.bo_system.train_X)} training points available. "
-                                   f"BO will use random sampling until more data is collected.")
-
         except Exception as e:
             app.logger.error(f"Error initializing optimizer: {str(e)}")
             return jsonify({
@@ -195,18 +190,15 @@ def initialize_system():
         # If historical records were provided, add them to the system
         if 'historicalRecords' in data and data['historicalRecords']:
             app.logger.info(f"Processing {len(data['historicalRecords'])} historical records")
-
             added_count = 0
             for exp in data['historicalRecords']:
                 # Validate required fields
                 required_fields = ['Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2',
                                    'Amine_3_or_Additive_3', 'MW_Mn_g_mol', 'Organic_Content_pct', 'CO2_Capacity_mmol_g']
-
                 if not all(field in exp for field in required_fields):
                     app.logger.warning(f"Skipping historical record due to missing required fields: {exp}")
                     continue
 
-                # Create configuration dictionary
                 config = {
                     'Support': exp['Support'],
                     'Amine_1_or_Additive_1': exp['Amine_1_or_Additive_1'],
@@ -215,13 +207,9 @@ def initialize_system():
                     'MW_Mn_g_mol': float(exp['MW_Mn_g_mol']),
                     'Organic_Content_pct': float(exp['Organic_Content_pct'])
                 }
-
                 actual_capacity = float(exp['CO2_Capacity_mmol_g'])
-
-                # Add experimental result to the optimizer
                 optimizer.bo_system.add_experimental_result(config, actual_capacity)
 
-                # Add to current state for tracking
                 experiment_conditions = {
                     'Relative_Humidity_pct': exp.get('Humidity', current_state['conditions']['Relative_Humidity_pct']),
                     'CO2_Concentration_vol_pct': exp.get('CO2_Concentration', current_state['conditions']['CO2_Concentration_vol_pct']),
@@ -234,16 +222,16 @@ def initialize_system():
                     'id': len(current_state['real_experiments']),
                     'candidate': config,
                     'actual_capacity': actual_capacity,
-                    'predicted_capacity': actual_capacity,  # Using actual as predicted since this is real data
+                    'predicted_capacity': actual_capacity,
                     'notes': exp.get('notes', ''),
                     'timestamp': pd.Timestamp.now().isoformat(),
                     'conditions': experiment_conditions
                 }
-
                 current_state['real_experiments'].append(experiment_record)
 
                 if actual_capacity > current_state['best_capacity']:
                     current_state['best_capacity'] = actual_capacity
+                    current_state['best_experiment'] = experiment_record   # NEW
 
                 added_count += 1
 
@@ -251,9 +239,11 @@ def initialize_system():
             MAX_EXPERIMENTS_TO_KEEP = 50
             if len(current_state['real_experiments']) > MAX_EXPERIMENTS_TO_KEEP:
                 current_state['real_experiments'] = current_state['real_experiments'][-MAX_EXPERIMENTS_TO_KEEP:]
-                app.logger.info(f"Archived old experiments in frontend state, keeping {len(current_state['real_experiments'])} most recent")
 
             app.logger.info(f"Successfully added {added_count} historical records")
+
+        # Set iteration = number of real experiments
+        current_state['iteration'] = len(current_state['real_experiments'])
 
         best_capacity = float(optimizer.bo_system.train_Y.max().item()) if len(optimizer.bo_system.train_Y) > 0 else 0.0
 
@@ -262,7 +252,8 @@ def initialize_system():
             'message': 'System initialized successfully',
             'data_points': len(optimizer.bo_system.train_X),
             'best_capacity': best_capacity,
-            'conditions': current_state['conditions']
+            'conditions': current_state['conditions'],
+            'iteration': current_state['iteration']           # NEW
         })
 
     except Exception as e:
@@ -287,15 +278,11 @@ def generate_candidates():
             }), 400
 
         data = request.json or {}
-        n_candidates = data.get('n_candidates', 5)  # Default to 5 for top candidates
+        n_candidates = data.get('n_candidates', 5)
 
-        # Generate candidates (now works with zero data and falls back to random)
-        app.logger.info(f"Generating candidate pool")
-        all_candidates = optimizer.bo_system.generate_new_candidates(10)  # Generate 100
+        all_candidates = optimizer.bo_system.generate_new_candidates(10)
 
-        # MODIFIED: Removed the "insufficient data" error. If no candidates, return empty list with warning.
         if not all_candidates:
-            app.logger.warning("No candidates were generated (likely no search space defined).")
             return jsonify({
                 'success': True,
                 'candidates': [],
@@ -309,30 +296,22 @@ def generate_candidates():
                 'warning': 'No candidates could be generated. Please check your search bounds.'
             })
 
-        app.logger.info(f"Generated {len(all_candidates)} candidates from pool")
-
-        # Sort candidates by predicted capacity in descending order
+        # Sort candidates by predicted capacity
         sorted_candidates = sorted(
             all_candidates,
             key=lambda x: float(x.get('Predicted_CO2_Capacity_mmol_g', 0)),
             reverse=True
         )
-
-        # Select top n_candidates
         selected_candidates = sorted_candidates[:n_candidates]
-
-        # Also store the next 5 for comparison
         additional_candidates = sorted_candidates[n_candidates:n_candidates + 5]
-        app.logger.info(
-            f"Selected top {len(selected_candidates)} candidates and {len(additional_candidates)} additional for comparison")
 
-        # Store current candidates and all generated candidates for reference
         current_state['current_candidates'] = selected_candidates
         current_state['additional_candidates'] = additional_candidates
         current_state['all_generated_candidates'] = all_candidates
-        current_state['iteration'] += 1
 
-        # Format candidates for frontend with correct property names
+        # Do NOT increment iteration here – iteration = number of experiments
+
+        # Format candidates for frontend
         formatted_candidates = []
         for i, cand in enumerate(selected_candidates):
             candidate_data = {
@@ -370,7 +349,7 @@ def generate_candidates():
 
         return jsonify({
             'success': True,
-            'candidates': formatted_candidates,  # Top 5 candidates
+            'candidates': formatted_candidates,
             'iteration': current_state['iteration'],
             'best_capacity': best_capacity,
             'stats': {
@@ -389,6 +368,7 @@ def generate_candidates():
             'error': f'Failed to generate candidates: {str(e)}'
         }), 500
 
+
 @app.route('/experimental-form')
 def experimental_form():
     """Serve the experimental data input form"""
@@ -400,6 +380,8 @@ def experimental_form():
             'success': False,
             'error': f'Failed to load experimental form: {str(e)}'
         }), 500
+
+
 @app.route('/api/record-experiment', methods=['POST'])
 def record_experiment():
     """Record an experimental result from a generated candidate"""
@@ -415,7 +397,6 @@ def record_experiment():
 
         app.logger.info(f"Recording experiment: {data}")
 
-        # Check if there are any candidates to record results for
         if not current_state.get('current_candidates') or len(current_state['current_candidates']) == 0:
             return jsonify({'success': False, 'error': 'No candidates available to record experiment for. Please generate candidates first.'}), 400
 
@@ -453,31 +434,38 @@ def record_experiment():
                                                    original_expected_improvement=original_expected_improvement,
                                                    original_predicted_capacity=original_predicted_capacity)
 
-        experiment = {
+        experiment_conditions = current_state['conditions'].copy()
+        experiment_record = {
             'id': len(current_state['real_experiments']),
-            'candidate': candidate,
+            'candidate': backend_candidate,
             'actual_capacity': actual_capacity,
             'predicted_capacity': float(candidate.get('predictedCapacity', candidate.get('Predicted_CO2_Capacity_mmol_g', 0))),
             'notes': notes,
             'timestamp': pd.Timestamp.now().isoformat(),
-            'conditions': current_state['conditions']
+            'conditions': experiment_conditions
         }
 
-        current_state['real_experiments'].append(experiment)
+        current_state['real_experiments'].append(experiment_record)
+        current_state['iteration'] = len(current_state['real_experiments'])   # update iteration
 
         if actual_capacity > current_state['best_capacity']:
             current_state['best_capacity'] = actual_capacity
+            current_state['best_experiment'] = experiment_record
 
         MAX_EXPERIMENTS_TO_KEEP = 50
         if len(current_state['real_experiments']) > MAX_EXPERIMENTS_TO_KEEP:
             current_state['real_experiments'] = current_state['real_experiments'][-MAX_EXPERIMENTS_TO_KEEP:]
-            app.logger.info(f"Archived old experiments in frontend state, keeping {len(current_state['real_experiments'])} most recent")
+
+        # Get updated total data points
+        total_data_points = len(optimizer.bo_system.train_X) if hasattr(optimizer.bo_system, 'train_X') else 0
 
         return jsonify({
             'success': True,
-            'experiment_id': experiment['id'],
+            'experiment_id': experiment_record['id'],
             'best_capacity': current_state['best_capacity'],
-            'total_experiments': len(current_state['real_experiments'])
+            'total_experiments': len(current_state['real_experiments']),
+            'iteration': current_state['iteration'],
+            'total_data_points': total_data_points
         })
 
     except Exception as e:
@@ -504,7 +492,7 @@ def input_historical_records():
         # If the system isn't initialized, initialize it with default parameters and the provided data
         if optimizer is None:
             app.logger.info("System not initialized, initializing with default parameters and historical data")
-            
+
             # Set default conditions
             current_state['conditions'] = {
                 'Relative_Humidity_pct': 0,
@@ -513,7 +501,7 @@ def input_historical_records():
                 'Adsorption_Temperature_C': 25.0,
                 'CO2_Test_Method': 'TGA'
             }
-            
+
             # Set default search bounds
             current_state['search_bounds'] = {
                 'supports': [
@@ -540,28 +528,11 @@ def input_historical_records():
                 'ocRange': [0, 100]
             }
 
-            # Transform frontend search bounds to backend format
             categorical_bounds = {
-                "Support": current_state['search_bounds'].get('supports', [
-                    'SBA-15', 'NS', 'MCM-41', 'MCM-48', 'Mesoporous γ-Al2O3', 'MMSN',
-                    'MCF', 'MMON', 'MPS', 'BHMS', 'SA', 'FAU', 'MIL-101(Cr)', 'MCM-36',
-                    'THMS', 'MF', 'NPREXAD4', 'NPRED4020', 'PREXAD7', 'PREHP2MG',
-                    'PREDA201', 'NPREHP20', 'R-CFA-SBA-15', 'W-CFA-SBA-15', 'ZN', 'AC',
-                    'FS', 'CNS', 'CA', 'PREHPD450', 'MPC'
-                ]),
-                "Amine_1_or_Additive_1": current_state['search_bounds'].get('amine1', [
-                    'BPEI', 'TEPA', 'DEA', 'DETA', 'LPEI', 'Ph-3-ED', 'Ph-3-PD',
-                    'Ph-6-ED', 'Ph-6-PD', 'PEG200', 'TETA', 'TPTA', 'EI-Den', 'PI-Den',
-                    'AM-TEPA', 'PAA', 'GPAA', 'CTMA+', 'PPG', 'LPPI', 'PGA', 'PZ',
-                    'MEA', 'EDA', 'Spermine', 'Spermidine', 'TREN', 'EP', 'EB-TEPA',
-                    'PEHA', 'AN-TEPA'
-                ]),
-                "Amine_2_or_Additive_2": current_state['search_bounds'].get('amine2', [
-                    'No', 'DEA', 'CTAB', 'P123', 'PC', 'PEG200', 'SDS', 'Span80',
-                    'PEG1000', 'CTAC', 'DPPD', 'TBD', 'DBPD', 'BHT', 'PET', 'TDE',
-                    'HEDS', 'DTDP', 'BTES', 'APTES', 'TEOT', 'CTMA+'
-                ]),
-                "Amine_3_or_Additive_3": current_state['search_bounds'].get('additive3', ['No', 'CTAC'])
+                "Support": current_state['search_bounds'].get('supports', []),
+                "Amine_1_or_Additive_1": current_state['search_bounds'].get('amine1', []),
+                "Amine_2_or_Additive_2": current_state['search_bounds'].get('amine2', []),
+                "Amine_3_or_Additive_3": current_state['search_bounds'].get('additive3', [])
             }
 
             continuous_bounds = {
@@ -575,9 +546,7 @@ def input_historical_records():
                 )
             }
 
-            # Initialize optimizer
             try:
-                # Initialize BO system first
                 data_processor = HistoricalDataProcessor('data/historical_experiments.csv')
                 bo_system = CatalystBOWithHistory(
                     data_processor,
@@ -592,13 +561,8 @@ def input_historical_records():
                     categorical_bounds=categorical_bounds,
                     continuous_bounds=continuous_bounds
                 )
-
-                # Assign the BO system to the optimizer
                 optimizer.bo_system = bo_system
-
                 app.logger.info(f"Optimizer initialized successfully with historical data")
-                app.logger.info(f"Training data size: {len(optimizer.bo_system.train_X)}")
-
             except Exception as e:
                 app.logger.error(f"Error initializing optimizer: {str(e)}")
                 return jsonify({
@@ -608,15 +572,12 @@ def input_historical_records():
 
         added_count = 0
         for exp in experiments:
-            # Validate required fields
             required_fields = ['Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2',
                                'Amine_3_or_Additive_3', 'MW_Mn_g_mol', 'Organic_Content_pct', 'CO2_Capacity_mmol_g']
-
             if not all(field in exp for field in required_fields):
                 app.logger.warning(f"Skipping experiment due to missing required fields: {exp}")
                 continue
 
-            # Create configuration dictionary
             config = {
                 'Support': exp['Support'],
                 'Amine_1_or_Additive_1': exp['Amine_1_or_Additive_1'],
@@ -625,14 +586,10 @@ def input_historical_records():
                 'MW_Mn_g_mol': float(exp['MW_Mn_g_mol']),
                 'Organic_Content_pct': float(exp['Organic_Content_pct'])
             }
-
             actual_capacity = float(exp['CO2_Capacity_mmol_g'])
 
-            # Add experimental result to the optimizer - this adds to training data
             optimizer.bo_system.add_experimental_result(config, actual_capacity)
 
-            # Add to current state for tracking
-            # Use conditions from the experiment data if provided, otherwise use current system conditions
             experiment_conditions = {
                 'Relative_Humidity_pct': exp.get('Humidity', current_state['conditions']['Relative_Humidity_pct']),
                 'CO2_Concentration_vol_pct': exp.get('CO2_Concentration', current_state['conditions']['CO2_Concentration_vol_pct']),
@@ -645,31 +602,24 @@ def input_historical_records():
                 'id': len(current_state['real_experiments']),
                 'candidate': config,
                 'actual_capacity': actual_capacity,
-                'predicted_capacity': actual_capacity,  # Using actual as predicted since this is real data
+                'predicted_capacity': actual_capacity,
                 'notes': exp.get('notes', ''),
                 'timestamp': pd.Timestamp.now().isoformat(),
                 'conditions': experiment_conditions
             }
-
             current_state['real_experiments'].append(experiment_record)
 
             if actual_capacity > current_state['best_capacity']:
                 current_state['best_capacity'] = actual_capacity
+                current_state['best_experiment'] = experiment_record
 
             added_count += 1
 
-        # After adding historical data, retrain the model if possible
-        try:
-            # Optionally update the model with the new data
-            app.logger.info(f"Retraining model with {len(optimizer.bo_system.train_X)} data points after adding historical records")
-        except Exception as e:
-            app.logger.warning(f"Could not retrain model after adding historical data: {str(e)}")
+        current_state['iteration'] = len(current_state['real_experiments'])
 
-        # Limit the number of stored experiments
         MAX_EXPERIMENTS_TO_KEEP = 50
         if len(current_state['real_experiments']) > MAX_EXPERIMENTS_TO_KEEP:
             current_state['real_experiments'] = current_state['real_experiments'][-MAX_EXPERIMENTS_TO_KEEP:]
-            app.logger.info(f"Archived old experiments in frontend state, keeping {len(current_state['real_experiments'])} most recent")
 
         app.logger.info(f"Successfully added {added_count} historical data points as training data")
 
@@ -708,15 +658,12 @@ def input_custom_experimental_data():
 
         added_count = 0
         for exp in experiments:
-            # Validate required fields
-            required_fields = ['Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2', 
+            required_fields = ['Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2',
                                'Amine_3_or_Additive_3', 'MW_Mn_g_mol', 'Organic_Content_pct', 'CO2_Capacity_mmol_g']
-            
             if not all(field in exp for field in required_fields):
                 app.logger.warning(f"Skipping experiment due to missing required fields: {exp}")
                 continue
-            
-            # Create configuration dictionary
+
             config = {
                 'Support': exp['Support'],
                 'Amine_1_or_Additive_1': exp['Amine_1_or_Additive_1'],
@@ -725,14 +672,10 @@ def input_custom_experimental_data():
                 'MW_Mn_g_mol': float(exp['MW_Mn_g_mol']),
                 'Organic_Content_pct': float(exp['Organic_Content_pct'])
             }
-            
             actual_capacity = float(exp['CO2_Capacity_mmol_g'])
-            
-            # Add experimental result to the optimizer
+
             optimizer.bo_system.add_experimental_result(config, actual_capacity)
 
-            # Add to current state for tracking
-            # Use conditions from the experiment data if provided, otherwise use current system conditions
             experiment_conditions = {
                 'Relative_Humidity_pct': exp.get('Humidity', current_state['conditions']['Relative_Humidity_pct']),
                 'CO2_Concentration_vol_pct': exp.get('CO2_Concentration', current_state['conditions']['CO2_Concentration_vol_pct']),
@@ -745,24 +688,24 @@ def input_custom_experimental_data():
                 'id': len(current_state['real_experiments']),
                 'candidate': config,
                 'actual_capacity': actual_capacity,
-                'predicted_capacity': actual_capacity,  # Using actual as predicted since this is real data
+                'predicted_capacity': actual_capacity,
                 'notes': exp.get('notes', ''),
                 'timestamp': pd.Timestamp.now().isoformat(),
                 'conditions': experiment_conditions
             }
-
             current_state['real_experiments'].append(experiment_record)
 
             if actual_capacity > current_state['best_capacity']:
                 current_state['best_capacity'] = actual_capacity
+                current_state['best_experiment'] = experiment_record
 
             added_count += 1
 
-        # Limit the number of stored experiments
+        current_state['iteration'] = len(current_state['real_experiments'])
+
         MAX_EXPERIMENTS_TO_KEEP = 50
         if len(current_state['real_experiments']) > MAX_EXPERIMENTS_TO_KEEP:
             current_state['real_experiments'] = current_state['real_experiments'][-MAX_EXPERIMENTS_TO_KEEP:]
-            app.logger.info(f"Archived old experiments in frontend state, keeping {len(current_state['real_experiments'])} most recent")
 
         app.logger.info(f"Successfully added {added_count} custom experimental data points")
 
@@ -771,6 +714,8 @@ def input_custom_experimental_data():
             'added_count': added_count,
             'total_experiments': len(current_state['real_experiments']),
             'best_capacity': current_state['best_capacity'],
+            'iteration': current_state['iteration'],
+            'total_data_points': len(optimizer.bo_system.train_X),
             'message': f'Successfully added {added_count} custom experimental data points'
         })
 
@@ -782,11 +727,17 @@ def input_custom_experimental_data():
         }), 500
 
 
+@app.route('/api/input-custom-experimental-results', methods=['POST'])
+def input_experimental_results():
+    """Alias for input_custom_experimental_data (used by experimental_form.html)"""
+    return input_custom_experimental_data()
+
+
 @app.route('/api/get-history', methods=['GET'])
 def get_history():
     """Get experiment history"""
     try:
-        experiments = current_state['real_experiments'][-10:]  # Last 10 experiments
+        experiments = current_state['real_experiments'][-10:]
         return jsonify({
             'success': True,
             'experiments': experiments,
@@ -811,6 +762,7 @@ def get_status():
                 'message': 'System not initialized',
                 'iteration': current_state['iteration'],
                 'best_capacity': current_state['best_capacity'],
+                'best_experiment': current_state['best_experiment'],
                 'total_experiments': len(current_state['real_experiments']),
                 'total_data_points': 0,
                 'data_mode': 'not initialized',
@@ -851,6 +803,7 @@ def get_status():
             'initialized': True,
             'iteration': current_state['iteration'],
             'best_capacity': current_state['best_capacity'],
+            'best_experiment': current_state['best_experiment'],
             'total_experiments': len(current_state['real_experiments']),
             'total_data_points': total_data_points,
             'data_mode': 'real-only' if optimizer.bo_system.use_real_data_only else 'combined',
@@ -879,8 +832,6 @@ def toggle_data_mode():
         data = request.json or {}
         mode = data.get('mode')
 
-        # MODIFIED: Removed the "need at least 2 real experiments" check.
-        # User can switch to real-only even with zero real experiments.
         if mode == 'real-only':
             optimizer.bo_system.use_real_data_only = True
         else:
@@ -941,7 +892,7 @@ def export_data():
 @app.route('/api/update-conditions', methods=['POST'])
 def update_conditions():
     """Update experimental conditions"""
-    global current_state
+    global current_state, optimizer
 
     try:
         data = request.json
@@ -1033,8 +984,6 @@ def update_config():
 
         if 'conditions' in data:
             conditions = data['conditions']
-            app.logger.info(f"Updating conditions from frontend: {conditions}")
-
             condition_mapping = {
                 'co2Concentration': 'CO2_Concentration_vol_pct',
                 'temperature': 'Adsorption_Temperature_C',
@@ -1042,7 +991,6 @@ def update_config():
                 'flowRate': 'Flow_Rate_mL_min',
                 'testMethod': 'CO2_Test_Method'
             }
-
             for frontend_key, backend_key in condition_mapping.items():
                 if frontend_key in conditions:
                     value = conditions[frontend_key]
@@ -1050,8 +998,6 @@ def update_config():
                         current_state['conditions'][backend_key] = str(value)
                     else:
                         current_state['conditions'][backend_key] = float(value)
-
-        app.logger.info(f"Final conditions for backend: {current_state['conditions']}")
 
         categorical_bounds = {
             "Support": current_state['search_bounds'].get('supports', []),
@@ -1093,100 +1039,6 @@ def update_config():
         }), 500
 
 
-@app.route('/api/input-custom-experimental-results', methods=['POST'])
-def input_experimental_results():
-    """Input custom experimental results to improve the model"""
-    global optimizer, current_state
-
-    if optimizer is None:
-        return jsonify({'success': False, 'error': 'System not initialized'}), 400
-
-    try:
-        data = request.json
-        if not data or 'experiments' not in data:
-            return jsonify({'success': False, 'error': 'No experimental data provided'}), 400
-
-        experiments = data['experiments']
-        if not isinstance(experiments, list) or len(experiments) == 0:
-            return jsonify({'success': False, 'error': 'No experiments provided'}), 400
-
-        added_count = 0
-        for exp in experiments:
-            required_fields = ['Support', 'Amine_1_or_Additive_1', 'MW_Mn_g_mol',
-                             'Organic_Content_pct', 'CO2_Capacity_mmol_g']
-            for field in required_fields:
-                if field not in exp:
-                    app.logger.warning(f"Missing required field '{field}' in experiment: {exp}")
-                    return jsonify({'success': False, 'error': f'Missing required field: {field}'}), 400
-
-            candidate = {
-                'Support': exp['Support'],
-                'Amine_1_or_Additive_1': exp['Amine_1_or_Additive_1'],
-                'Amine_2_or_Additive_2': exp.get('Amine_2_or_Additive_2', 'No'),
-                'Amine_3_or_Additive_3': exp.get('Amine_3_or_Additive_3', 'No'),
-                'MW_Mn_g_mol': float(exp['MW_Mn_g_mol']),
-                'Organic_Content_pct': float(exp['Organic_Content_pct'])
-            }
-
-            actual_capacity = float(exp['CO2_Capacity_mmol_g'])
-
-            optimizer.bo_system.add_experimental_result(
-                candidate,
-                actual_capacity,
-                original_uncertainty=None,
-                original_expected_improvement=None,
-                original_predicted_capacity=None
-            )
-
-            experiment = {
-                'id': len(current_state['real_experiments']),
-                'candidate': candidate,
-                'actual_capacity': actual_capacity,
-                'predicted_capacity': actual_capacity,
-                'notes': exp.get('Notes', ''),
-                'timestamp': pd.Timestamp.now().isoformat(),
-                'conditions': {
-                    'Relative_Humidity_pct': exp.get('Humidity', current_state['conditions']['Relative_Humidity_pct']),
-                    'CO2_Concentration_vol_pct': exp.get('CO2_Concentration', current_state['conditions']['CO2_Concentration_vol_pct']),
-                    'Flow_Rate_mL_min': exp.get('Flow_Rate', current_state['conditions']['Flow_Rate_mL_min']),
-                    'Adsorption_Temperature_C': exp.get('Temperature', current_state['conditions']['Adsorption_Temperature_C']),
-                    'CO2_Test_Method': exp.get('Test_Method', current_state['conditions']['CO2_Test_Method'])
-                }
-            }
-
-            current_state['real_experiments'].append(experiment)
-
-            if actual_capacity > current_state['best_capacity']:
-                current_state['best_capacity'] = actual_capacity
-
-            added_count += 1
-
-        MAX_EXPERIMENTS_TO_KEEP = 50
-        if len(current_state['real_experiments']) > MAX_EXPERIMENTS_TO_KEEP:
-            current_state['real_experiments'] = current_state['real_experiments'][-MAX_EXPERIMENTS_TO_KEEP:]
-            app.logger.info(f"Archived old experiments in frontend state, keeping {len(current_state['real_experiments'])} most recent")
-
-        app.logger.info(f"Added {added_count} experimental results to the system")
-        return jsonify({
-            'success': True,
-            'message': f'Successfully added {added_count} experimental result(s)',
-            'added_count': added_count
-        })
-
-    except ValueError as ve:
-        app.logger.error(f"Value error processing experimental results: {str(ve)}")
-        return jsonify({
-            'success': False,
-            'error': f'Invalid value in experimental data: {str(ve)}'
-        }), 400
-    except Exception as e:
-        app.logger.error(f"Error processing experimental results: {str(e)}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'error': f'Failed to process experimental results: {str(e)}'
-        }), 500
-
-
 @app.route('/api/archive-experiments', methods=['POST'])
 def archive_experiments():
     """Manually trigger archiving of old experiments"""
@@ -1214,6 +1066,84 @@ def archive_experiments():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/generate-chart', methods=['GET'])
+def generate_chart():
+    """Generate optimization chart as image, including historical data as separate points"""
+    global optimizer
+
+    try:
+        if optimizer is None or optimizer.bo_system is None:
+            return jsonify({
+                'success': False,
+                'error': 'System not initialized'
+            }), 400
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        # --- Historical data points (from initial CSV, if any) ---
+        historical_df = optimizer.bo_system.historical_df
+        if historical_df is not None and len(historical_df) > 0:
+            # Filter to only rows with valid capacity
+            hist_capacities = historical_df['CO2_Capacity_mmol_g'].dropna()
+            if len(hist_capacities) > 0:
+                # Plot at iteration 0, with transparency and distinct marker
+                ax.scatter([0] * len(hist_capacities), hist_capacities,
+                           color='gray', alpha=0.6, marker='x', s=60, label='Historical Data')
+
+        # --- Real experiment history (optimization iterations) ---
+        history = optimizer.bo_system.get_optimization_history()
+        if history:
+            iterations = [entry['iteration'] for entry in history]
+            actual_capacities = [entry['actual_capacity'] for entry in history]
+            predicted_capacities = [entry['predicted_capacity'] for entry in history]
+            uncertainties = [entry['uncertainty'] for entry in history]
+
+            best_capacities = []
+            running_best = float('-inf')
+            for actual in actual_capacities:
+                running_best = max(running_best, actual)
+                best_capacities.append(running_best)
+
+            upper_bounds = [pred + 1.96 * unc for pred, unc in zip(predicted_capacities, uncertainties)]
+            lower_bounds = [max(0, pred - 1.96 * unc) for pred, unc in zip(predicted_capacities, uncertainties)]
+
+            ax.plot(iterations, best_capacities, label='Best Capacity', color='#27ae60', linewidth=3, marker='o')
+            ax.plot(iterations, predicted_capacities, label='Predicted Capacity', color='#3498db', linewidth=2, marker='s')
+            ax.plot(iterations, actual_capacities, label='Real Capacity', color='#e74c3c', linewidth=2, linestyle='--', marker='^')
+            ax.fill_between(iterations, lower_bounds, upper_bounds, color='#3498db', alpha=0.3, label='Confidence Interval')
+
+            ax.set_xlabel('Iteration')
+            ax.set_ylabel('CO₂ Capacity (mmol/g)')
+            ax.set_title('Optimization Progress')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+            if len(iterations) > 10:
+                plt.xticks(rotation=45)
+        else:
+            ax.text(0.5, 0.5, 'No experimental data yet', horizontalalignment='center',
+                   verticalalignment='center', transform=ax.transAxes, fontsize=14)
+            ax.set_title('Optimization Progress')
+
+        img_buffer = BytesIO()
+        plt.tight_layout()
+        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
+        img_buffer.seek(0)
+
+        img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+        plt.close(fig)
+
+        return jsonify({
+            'success': True,
+            'chart_data': f"data:image/png;base64,{img_base64}"
+        })
+
+    except Exception as e:
+        app.logger.error(f"Error generating chart: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/test', methods=['GET'])
@@ -1237,21 +1167,19 @@ def reset_system():
     global optimizer, current_state
 
     try:
-        # Store current conditions and search bounds
         current_conditions = current_state['conditions'].copy()
         current_search_bounds = current_state['search_bounds'].copy()
 
-        # Reset the state
         current_state = {
             'iteration': 0,
             'best_capacity': 0.0,
+            'best_experiment': None,
             'real_experiments': [],
             'current_candidates': [],
             'conditions': current_conditions,
             'search_bounds': current_search_bounds
         }
 
-        # Re-initialize the optimizer with the same conditions and search bounds
         try:
             categorical_bounds = {
                 "Support": current_state['search_bounds'].get('supports', [
@@ -1294,7 +1222,6 @@ def reset_system():
                 continuous_bounds=continuous_bounds
             )
 
-            # Initialize BO system
             data_processor = HistoricalDataProcessor('data/historical_experiments.csv')
             optimizer.bo_system = CatalystBOWithHistory(
                 data_processor,
@@ -1304,7 +1231,6 @@ def reset_system():
             )
 
             app.logger.info(f"Optimizer re-initialized successfully with preserved conditions and search bounds")
-
         except Exception as e:
             app.logger.error(f"Error re-initializing optimizer: {str(e)}")
             return jsonify({
@@ -1327,85 +1253,10 @@ def reset_system():
         }), 500
 
 
-@app.route('/api/generate-chart', methods=['GET'])
-def generate_chart():
-    """Generate optimization chart as image"""
-    global optimizer
-
-    try:
-        if optimizer is None or optimizer.bo_system is None:
-            return jsonify({
-                'success': False,
-                'error': 'System not initialized'
-            }), 400
-
-        history = optimizer.bo_system.get_optimization_history()
-
-        if not history:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.text(0.5, 0.5, 'No data available', horizontalalignment='center',
-                   verticalalignment='center', transform=ax.transAxes, fontsize=14)
-            ax.set_title('Optimization Progress')
-        else:
-            iterations = [entry['iteration'] for entry in history]
-
-            actual_capacities = [entry['actual_capacity'] for entry in history]
-            best_capacities = []
-            running_best = float('-inf')
-            for actual in actual_capacities:
-                running_best = max(running_best, actual)
-                best_capacities.append(running_best)
-
-            predicted_capacities = [entry['predicted_capacity'] for entry in history]
-            uncertainties = [entry['uncertainty'] for entry in history]
-
-            upper_bounds = [pred + 1.96 * unc for pred, unc in zip(predicted_capacities, uncertainties)]
-            lower_bounds = [max(0, pred - 1.96 * unc) for pred, unc in zip(predicted_capacities, uncertainties)]
-
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(iterations, best_capacities, label='Best Capacity', color='#27ae60', linewidth=3, marker='o')
-            ax.plot(iterations, predicted_capacities, label='Predicted Capacity', color='#3498db', linewidth=2, marker='s')
-            ax.plot(iterations, actual_capacities, label='Real Capacity', color='#e74c3c', linewidth=2, linestyle='--', marker='^')
-            ax.fill_between(iterations, lower_bounds, upper_bounds, color='#3498db', alpha=0.3, label='Confidence Interval')
-            ax.set_xlabel('Iteration')
-            ax.set_ylabel('CO₂ Capacity (mmol/g)')
-            ax.set_title('Optimization Progress')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-
-            if len(iterations) > 10:
-                plt.xticks(rotation=45)
-
-        img_buffer = BytesIO()
-        plt.tight_layout()
-        plt.savefig(img_buffer, format='png', dpi=150, bbox_inches='tight')
-        img_buffer.seek(0)
-
-        img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
-        plt.close(fig)
-
-        return jsonify({
-            'success': True,
-            'chart_data': f"data:image/png;base64,{img_base64}"
-        })
-
-    except Exception as e:
-        app.logger.error(f"Error generating chart: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
 if __name__ == '__main__':
-    # Set random seeds for reproducibility
     torch.manual_seed(42)
     np.random.seed(42)
 
-    # Create data directory if it doesn't exist
     os.makedirs('data', exist_ok=True)
-
-    # Historical data is optional; no dummy data is created automatically.
-    # The system will work with zero data and fall back to random sampling.
 
     app.run(debug=True, port=5001, use_reloader=True)

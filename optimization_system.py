@@ -64,7 +64,6 @@ class HistoricalDataProcessor:
         # replace categorical data 0 to be "No"
         df = df.replace(to_replace='0', value='No')
 
-
         # Filter by user-selected categorical bounds first
         if categorical_bounds:
             for col, allowed_values in categorical_bounds.items():
@@ -188,10 +187,6 @@ class CatalystBOWithHistory:
             self.user_categorical_bounds
         )
 
-        # MODIFIED: No minimum data requirement; empty tensors are allowed.
-        if len(self.train_X) == 0:
-            print("Warning: No historical data after filtering. System will rely on user-specified bounds and generate random candidates initially.")
-
         print(f"Loaded {len(self.train_X)} historical experiments")
         if len(self.train_X) > 0:
             print(f"Best historical capacity: {self.train_Y.max().item():.4f} mmol/g")
@@ -203,7 +198,6 @@ class CatalystBOWithHistory:
 
     def _initialize_bounds_and_unique_values(self):
         """Initialize unique values and bounds for optimization"""
-        # MODIFIED: Handle empty historical dataframe gracefully.
         if len(self.historical_df) == 0:
             historical_supports = []
             historical_amines1 = []
@@ -229,7 +223,7 @@ class CatalystBOWithHistory:
 
         # If no unique values exist (no data and no user bounds), provide defaults
         if len(self.unique_supports) == 0:
-            self.unique_supports = ['SBA-15']  # fallback default
+            self.unique_supports = ['SBA-15']
         if len(self.unique_amines1) == 0:
             self.unique_amines1 = ['No']
         if len(self.unique_amines2) == 0:
@@ -264,7 +258,6 @@ class CatalystBOWithHistory:
                 oc_min = oc_min - oc_padding
                 oc_max = oc_max + oc_padding
             else:
-                # Default bounds when no historical data and no user bounds
                 mw_min, mw_max = 0, 10000
                 oc_min, oc_max = 0, 100
 
@@ -323,7 +316,6 @@ class CatalystBOWithHistory:
     def _preprocess_real_data(self):
         """Preprocess only real experimental data (no minimum sample requirement)."""
         if len(self.real_experiments_df) == 0:
-            # No real data -> set empty tensors
             self.train_X = torch.tensor([])
             self.train_Y = torch.tensor([])
             return
@@ -368,7 +360,6 @@ class CatalystBOWithHistory:
         y = filtered_df[self.data_processor.target_col].values.reshape(-1, 1)
 
         if len(X) == 0:
-            # No data after filtering -> empty tensors
             self.train_X = torch.tensor([])
             self.train_Y = torch.tensor([])
             return
@@ -445,7 +436,6 @@ class CatalystBOWithHistory:
 
             combined_mask = temp_mask | rh_mask | co2_mask
 
-            # Broaden if too few points, but never raise an error.
             if combined_mask.sum() < 5:
                 temp_tolerance *= 2
                 rh_tolerance *= 2
@@ -583,8 +573,6 @@ class CatalystBOWithHistory:
         candidates_to_generate = max(n_candidates * 2, 10)
         gp = None
 
-        # MODIFIED: Removed the early return for len(train_X) < 5.
-        # Instead, if no data or bounds invalid, we generate random candidates.
         if not self._are_bounds_valid() or len(self.train_X) < 3:
             print("Warning: Not enough training data or invalid bounds. Generating random candidates.")
             candidates = self._generate_random_candidates(candidates_to_generate)
@@ -628,7 +616,7 @@ class CatalystBOWithHistory:
                 mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
                 fit_gpytorch_mll(mll)
             except:
-                pass  # keep gp as None
+                pass
 
         best_f_val = self.train_Y.max().item() if len(self.train_X) > 0 else 0.0
         all_candidate_configs = []
@@ -684,7 +672,7 @@ class CatalystBOWithHistory:
         return True
 
     def _generate_random_candidates(self, n_candidates: int) -> torch.Tensor:
-        """Generate random candidates as fallback (BoTorch random sampling)."""
+        """Generate random candidates as fallback."""
         candidates = torch.rand(n_candidates, 6, dtype=torch.float32)
         candidates = candidates * (self.bounds[1] - self.bounds[0]) + self.bounds[0]
         candidates = self.round_categorical(candidates)
@@ -724,9 +712,6 @@ class CatalystBOWithHistory:
         print(f"\nAdded new real experiment: {actual_capacity:.4f} mmol/g")
         print(f"Total real experiments: {len(self.real_experiments_df)}")
 
-        # MODIFIED: Removed automatic switch to real-data-only after 5 experiments.
-        # User must toggle manually.
-
         self._track_optimization_progress(actual_capacity, original_uncertainty,
                                           original_expected_improvement, original_predicted_capacity)
 
@@ -736,7 +721,7 @@ class CatalystBOWithHistory:
     def _track_optimization_progress(self, actual_capacity: float, original_uncertainty=None,
                                      original_expected_improvement=None, original_predicted_capacity=None):
         """Track optimization progress for visualization"""
-        iteration = len(self.real_experiments_df)
+        iteration = len(self.real_experiments_df)   # iteration = number of real experiments
 
         all_capacities = []
         if len(self.train_Y) > 0:
@@ -750,12 +735,9 @@ class CatalystBOWithHistory:
             uncertainty = original_uncertainty
         else:
             uncertainty = 0.0
-            predicted_capacity = actual_capacity
 
         if original_predicted_capacity is not None:
             predicted_capacity_for_this_experiment = original_predicted_capacity
-        elif original_uncertainty is not None:
-            predicted_capacity_for_this_experiment = actual_capacity
         else:
             predicted_capacity_for_this_experiment = actual_capacity
 
@@ -776,7 +758,7 @@ class CatalystBOWithHistory:
             self.optimization_history = self.optimization_history[-MAX_HISTORY_SIZE:]
 
         print(f"Optimization history updated: iteration={iteration}, best={current_best:.4f}, "
-              f"predicted={actual_capacity:.4f}, uncertainty={uncertainty:.4f}")
+              f"predicted={predicted_capacity_for_this_experiment:.4f}, uncertainty={uncertainty:.4f}")
 
     def get_optimization_history(self) -> List[Dict]:
         return self.optimization_history
@@ -825,7 +807,6 @@ class CatalystBOWithHistory:
         if 'Additive 3' in self.user_categorical_bounds:
             self.unique_amines3 = self.user_categorical_bounds.get('Additive 3', historical_amines3)
 
-        # Fallback defaults if still empty
         if len(self.unique_supports) == 0:
             self.unique_supports = ['SBA-15']
         if len(self.unique_amines1) == 0:
@@ -1090,9 +1071,6 @@ class InteractiveCatalystOptimizer:
     def _toggle_data_mode(self):
         current_mode = self.bo_system.use_real_data_only
         new_mode = not current_mode
-
-        # MODIFIED: No minimum requirement; can switch to real-only even with 0 real experiments.
-        # If no real data, switching to real-only will simply yield empty training data.
         self.bo_system.use_real_data_only = new_mode
         mode_name = "real experiments only" if new_mode else "historical + real experiments"
         print(f"\nSwitched to {mode_name} mode for GP fitting.")
