@@ -1716,11 +1716,21 @@
         }
 
         function populateHistoricalForm() {
+            // Determine which options to use - prioritize current search bounds over defaults
+            const supportsOptions = currentState.searchBounds?.supports?.length > 0 ? 
+                currentState.searchBounds.supports : DEFAULT_CONFIG.supports;
+            const amine1Options = currentState.searchBounds?.amine1?.length > 0 ? 
+                currentState.searchBounds.amine1 : DEFAULT_CONFIG.amine1;
+            const amine2Options = currentState.searchBounds?.amine2?.length > 0 ? 
+                currentState.searchBounds.amine2 : DEFAULT_CONFIG.amine2;
+            const additive3Options = currentState.searchBounds?.additive3?.length > 0 ? 
+                currentState.searchBounds.additive3 : DEFAULT_CONFIG.additive3;
+
             // Populate support dropdown
             const supportSelect = document.getElementById('exp-support');
             if (supportSelect) {
                 supportSelect.innerHTML = '<option value="">Select Support</option>';
-                DEFAULT_CONFIG.supports.forEach(support => {
+                supportsOptions.forEach(support => {
                     const option = document.createElement('option');
                     option.value = support;
                     option.textContent = support;
@@ -1732,7 +1742,7 @@
             const amine1Select = document.getElementById('exp-amine1');
             if (amine1Select) {
                 amine1Select.innerHTML = '<option value="">Select Amine/Additive</option>';
-                DEFAULT_CONFIG.amine1.forEach(amine => {
+                amine1Options.forEach(amine => {
                     const option = document.createElement('option');
                     option.value = amine;
                     option.textContent = amine;
@@ -1744,7 +1754,7 @@
             const amine2Select = document.getElementById('exp-amine2');
             if (amine2Select) {
                 amine2Select.innerHTML = '<option value="No">No</option>';
-                DEFAULT_CONFIG.amine2.forEach(amine => {
+                amine2Options.forEach(amine => {
                     if (amine !== "No") {
                         const option = document.createElement('option');
                         option.value = amine;
@@ -1758,7 +1768,7 @@
             const additive3Select = document.getElementById('exp-additive3');
             if (additive3Select) {
                 additive3Select.innerHTML = '<option value="No">No</option>';
-                DEFAULT_CONFIG.additive3.forEach(additive => {
+                additive3Options.forEach(additive => {
                     if (additive !== "No") {
                         const option = document.createElement('option');
                         option.value = additive;
@@ -1840,6 +1850,18 @@
                 return;
             }
 
+            // Check if system is already initialized
+            const systemStatusBadge = document.getElementById('systemStatusBadge');
+            if (systemStatusBadge && systemStatusBadge.textContent === 'Ready') {
+                // System is already initialized, submit records to the live system
+                await submitHistoricalRecordsToLiveSystem();
+            } else {
+                // System is not initialized, show message about initialization
+                showNotification(`Historical records (${currentState.historicalRecords.length}) are ready to be submitted during system initialization. Click "Initialize Optimization System" to proceed.`, 'info');
+            }
+        }
+
+        async function submitHistoricalRecordsToLiveSystem() {
             showLoading();
 
             try {
@@ -1977,31 +1999,11 @@
             showLoading();
 
             try {
-                // First, if we have historical records, send them separately to the historical records endpoint
-                if (currentState.historicalRecords.length > 0) {
-                    const historicalResponse = await fetch('/api/input-historical-records', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            experiments: currentState.historicalRecords
-                        })
-                    });
-
-                    const historicalResult = await historicalResponse.json();
-                    
-                    if (!historicalResult.success) {
-                        showNotification(`Failed to process historical records: ${historicalResult.error}`, 'danger');
-                        hideLoading();
-                        return;
-                    }
-                }
-
-                // Prepare data for API (without historical records since they're already sent)
+                // Prepare data for API (include historical records as part of initialization)
                 const initData = {
                     searchBounds: currentState.searchBounds,
-                    conditions: currentState.conditions
+                    conditions: currentState.conditions,
+                    historicalRecords: currentState.historicalRecords  // Include historical records in init
                 };
 
                 console.log("Sending initialization data:", initData);
@@ -2914,12 +2916,18 @@
         // Note: originalGoToStep is already declared at the top
         goToStep = function(stepNum) {
             originalGoToStep(stepNum);
+            if (stepNum === 3) {
+                setTimeout(populateHistoricalForm, 100);
+            }
             if (stepNum === 4) {
                 setTimeout(populateExperimentalForm, 100);
             }
         };
 
-        // Also populate the form when the page loads if we're already on step 4
+        // Also populate the form when the page loads if we're already on step 3 or 4
+        if (currentState.step === 3) {
+            setTimeout(populateHistoricalForm, 100);
+        }
         if (currentState.step === 4) {
             setTimeout(populateExperimentalForm, 100);
         }

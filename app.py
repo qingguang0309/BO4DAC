@@ -195,7 +195,7 @@ def initialize_system():
         # If historical records were provided, add them to the system
         if 'historicalRecords' in data and data['historicalRecords']:
             app.logger.info(f"Processing {len(data['historicalRecords'])} historical records")
-            
+
             added_count = 0
             for exp in data['historicalRecords']:
                 # Validate required fields
@@ -494,15 +494,117 @@ def input_historical_records():
     global optimizer, current_state
 
     try:
-        if optimizer is None:
-            return jsonify({'success': False, 'error': 'System not initialized'}), 400
-
         data = request.json
         if not data or 'experiments' not in data:
             return jsonify({'success': False, 'error': 'No historical data provided'}), 400
 
         experiments = data['experiments']
         app.logger.info(f"Inputting {len(experiments)} historical data points")
+
+        # If the system isn't initialized, initialize it with default parameters and the provided data
+        if optimizer is None:
+            app.logger.info("System not initialized, initializing with default parameters and historical data")
+            
+            # Set default conditions
+            current_state['conditions'] = {
+                'Relative_Humidity_pct': 0,
+                'CO2_Concentration_vol_pct': 0.04,
+                'Flow_Rate_mL_min': 100.0,
+                'Adsorption_Temperature_C': 25.0,
+                'CO2_Test_Method': 'TGA'
+            }
+            
+            # Set default search bounds
+            current_state['search_bounds'] = {
+                'supports': [
+                    'SBA-15', 'NS', 'MCM-41', 'MCM-48', 'Mesoporous γ-Al2O3', 'MMSN',
+                    'MCF', 'MMON', 'MPS', 'BHMS', 'SA', 'FAU', 'MIL-101(Cr)', 'MCM-36',
+                    'THMS', 'MF', 'NPREXAD4', 'NPRED4020', 'PREXAD7', 'PREHP2MG',
+                    'PREDA201', 'NPREHP20', 'R-CFA-SBA-15', 'W-CFA-SBA-15', 'ZN', 'AC',
+                    'FS', 'CNS', 'CA', 'PREHPD450', 'MPC'
+                ],
+                'amine1': [
+                    'BPEI', 'TEPA', 'DEA', 'DETA', 'LPEI', 'Ph-3-ED', 'Ph-3-PD',
+                    'Ph-6-ED', 'Ph-6-PD', 'PEG200', 'TETA', 'TPTA', 'EI-Den', 'PI-Den',
+                    'AM-TEPA', 'PAA', 'GPAA', 'CTMA+', 'PPG', 'LPPI', 'PGA', 'PZ',
+                    'MEA', 'EDA', 'Spermine', 'Spermidine', 'TREN', 'EP', 'EB-TEPA',
+                    'PEHA', 'AN-TEPA'
+                ],
+                'amine2': [
+                    'No', 'DEA', 'CTAB', 'P123', 'PC', 'PEG200', 'SDS', 'Span80',
+                    'PEG1000', 'CTAC', 'DPPD', 'TBD', 'DBPD', 'BHT', 'PET', 'TDE',
+                    'HEDS', 'DTDP', 'BTES', 'APTES', 'TEOT', 'CTMA+'
+                ],
+                'additive3': ['No', 'CTAC'],
+                'mwRange': [0, 10000],
+                'ocRange': [0, 100]
+            }
+
+            # Transform frontend search bounds to backend format
+            categorical_bounds = {
+                "Support": current_state['search_bounds'].get('supports', [
+                    'SBA-15', 'NS', 'MCM-41', 'MCM-48', 'Mesoporous γ-Al2O3', 'MMSN',
+                    'MCF', 'MMON', 'MPS', 'BHMS', 'SA', 'FAU', 'MIL-101(Cr)', 'MCM-36',
+                    'THMS', 'MF', 'NPREXAD4', 'NPRED4020', 'PREXAD7', 'PREHP2MG',
+                    'PREDA201', 'NPREHP20', 'R-CFA-SBA-15', 'W-CFA-SBA-15', 'ZN', 'AC',
+                    'FS', 'CNS', 'CA', 'PREHPD450', 'MPC'
+                ]),
+                "Amine_1_or_Additive_1": current_state['search_bounds'].get('amine1', [
+                    'BPEI', 'TEPA', 'DEA', 'DETA', 'LPEI', 'Ph-3-ED', 'Ph-3-PD',
+                    'Ph-6-ED', 'Ph-6-PD', 'PEG200', 'TETA', 'TPTA', 'EI-Den', 'PI-Den',
+                    'AM-TEPA', 'PAA', 'GPAA', 'CTMA+', 'PPG', 'LPPI', 'PGA', 'PZ',
+                    'MEA', 'EDA', 'Spermine', 'Spermidine', 'TREN', 'EP', 'EB-TEPA',
+                    'PEHA', 'AN-TEPA'
+                ]),
+                "Amine_2_or_Additive_2": current_state['search_bounds'].get('amine2', [
+                    'No', 'DEA', 'CTAB', 'P123', 'PC', 'PEG200', 'SDS', 'Span80',
+                    'PEG1000', 'CTAC', 'DPPD', 'TBD', 'DBPD', 'BHT', 'PET', 'TDE',
+                    'HEDS', 'DTDP', 'BTES', 'APTES', 'TEOT', 'CTMA+'
+                ]),
+                "Amine_3_or_Additive_3": current_state['search_bounds'].get('additive3', ['No', 'CTAC'])
+            }
+
+            continuous_bounds = {
+                "MW_Mn_g_mol": (
+                    float(current_state['search_bounds'].get('mwRange', [0, 10000])[0]),
+                    float(current_state['search_bounds'].get('mwRange', [0, 10000])[1])
+                ),
+                "Organic_Content_pct": (
+                    float(current_state['search_bounds'].get('ocRange', [0, 100])[0]),
+                    float(current_state['search_bounds'].get('ocRange', [0, 100])[1])
+                )
+            }
+
+            # Initialize optimizer
+            try:
+                # Initialize BO system first
+                data_processor = HistoricalDataProcessor('data/historical_experiments.csv')
+                bo_system = CatalystBOWithHistory(
+                    data_processor,
+                    current_state['conditions'],
+                    categorical_bounds,
+                    continuous_bounds
+                )
+
+                optimizer = InteractiveCatalystOptimizer(
+                    data_path='data/historical_experiments.csv',
+                    target_conditions=current_state['conditions'],
+                    categorical_bounds=categorical_bounds,
+                    continuous_bounds=continuous_bounds
+                )
+
+                # Assign the BO system to the optimizer
+                optimizer.bo_system = bo_system
+
+                app.logger.info(f"Optimizer initialized successfully with historical data")
+                app.logger.info(f"Training data size: {len(optimizer.bo_system.train_X)}")
+
+            except Exception as e:
+                app.logger.error(f"Error initializing optimizer: {str(e)}")
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to initialize optimizer: {str(e)}'
+                }), 500
 
         added_count = 0
         for exp in experiments:
