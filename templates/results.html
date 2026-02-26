@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}Results - DAC Material Optimizer{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-10 mx-auto">
+        <h1 class="mb-4">🏆 Optimization Results</h1>
+
+        <!-- Best Candidate -->
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">
+                <h4><i class="fas fa-trophy me-2"></i>Best Performing Material</h4>
+            </div>
+            <div class="card-body" id="bestCandidateContent">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Loading best candidate...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Recommendations -->
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h4><i class="fas fa-star me-2"></i>Top Candidate Recommendations</h4>
+            </div>
+            <div class="card-body" id="recommendationsContent">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2">Loading recommendations...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Performance Summary -->
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h4><i class="fas fa-chart-bar me-2"></i>Performance Summary</h4>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-4">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h3 id="bestCapacity" class="text-success">-</h3>
+                                <p class="text-muted mb-0">Best CO₂ Capacity</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h3 id="totalRealExps" class="text-primary">-</h3>
+                                <p class="text-muted mb-0">Real Experiments</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light mb-3">
+                            <div class="card-body">
+                                <h3 id="improvement" class="text-warning">-</h3>
+                                <p class="text-muted mb-0">vs. Initial Best</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadResults();
+});
+
+async function loadResults() {
+    try {
+        const statusResp = await fetch('/api/get-status');
+        if (!statusResp.ok) {
+            showNoSession();
+            return;
+        }
+        const statusData = await statusResp.json();
+        if (!statusData.success) {
+            showNoSession();
+            return;
+        }
+
+        const sessionId = statusData.session_id;
+        const bestCap = statusData.best_capacity || 0;
+        const bestExp = statusData.best_experiment;
+        const totalReal = statusData.total_experiments || 0;
+
+        document.getElementById('bestCapacity').innerHTML = `${bestCap.toFixed(3)} mmol/g`;
+        document.getElementById('totalRealExps').innerHTML = totalReal;
+
+        // Improvement
+        const expResp = await fetch(`/db/experiments?session_id=${sessionId}`);
+        const expData = await expResp.json();
+        const realExps = expData.experiments.filter(e => !e.is_historical);
+        const firstReal = realExps.length > 0 ? realExps[0].experimental_performance : 0;
+        const improvement = bestCap - firstReal;
+        document.getElementById('improvement').innerHTML = `${improvement.toFixed(3)} mmol/g`;
+
+        if (bestExp) {
+            displayBestCandidate(bestExp, bestCap);
+        } else {
+            document.getElementById('bestCandidateContent').innerHTML =
+                '<div class="alert alert-info">No experiments recorded yet</div>';
+        }
+
+        const sessionResp = await fetch(`/db/session/${sessionId}`);
+        const sessionData = await sessionResp.json();
+        const candidates = sessionData.session?.current_candidates || [];
+        displayRecommendations(candidates.slice(0,5));
+    } catch (error) {
+        console.error('Results error:', error);
+        document.getElementById('bestCandidateContent').innerHTML =
+            '<div class="alert alert-danger">Failed to load results</div>';
+    }
+}
+
+function displayBestCandidate(candidate, capacity) {
+    if (!candidate) {
+        document.getElementById('bestCandidateContent').innerHTML =
+            '<div class="alert alert-warning">No best candidate available</div>';
+        return;
+    }
+    let html = `
+        <div class="row">
+            <div class="col-md-6">
+                <h5 class="text-success">Capacity: ${capacity.toFixed(3)} mmol/g</h5>
+            </div>
+        </div>
+        <hr>
+        <div class="row">
+    `;
+    for (const [key, val] of Object.entries(candidate)) {
+        if (key.includes('_id') || key === 'Uncertainty' || key === 'Expected_Improvement') continue;
+        html += `
+            <div class="col-md-6 mb-2">
+                <strong>${key.replace(/_/g, ' ')}:</strong>
+                ${typeof val === 'number' ? val.toFixed(3) : val}
+            </div>
+        `;
+    }
+    html += '</div>';
+    document.getElementById('bestCandidateContent').innerHTML = html;
+}
+
+function displayRecommendations(candidates) {
+    const container = document.getElementById('recommendationsContent');
+    if (!candidates.length) {
+        container.innerHTML = '<div class="alert alert-info">Generate candidates first in the 4‑Step Optimizer</div>';
+        return;
+    }
+    let html = '<div class="row">';
+    candidates.forEach((cand, idx) => {
+        const perf = cand.Predicted_CO2_Capacity_mmol_g || 0;
+        const badgeClass = idx === 0 ? 'success' : idx === 1 ? 'warning' : 'info';
+        html += `
+            <div class="col-lg-6 mb-4">
+                <div class="card h-100 border-${badgeClass}">
+                    <div class="card-header bg-${badgeClass} text-white">
+                        <h5 class="mb-0">#${idx+1} – ${perf.toFixed(3)} mmol/g</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+        `;
+        const fields = ['Support', 'Amine_1_or_Additive_1', 'MW_Mn_g_mol', 'Organic_Content_pct'];
+        fields.forEach(f => {
+            if (cand[f]) {
+                html += `<div class="col-6"><small><strong>${f.replace(/_/g, ' ')}:</strong> ${cand[f]}</small></div>`;
+            }
+        });
+        html += `
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function showNoSession() {
+    document.getElementById('bestCandidateContent').innerHTML = 
+        '<div class="alert alert-warning">No active optimisation session</div>';
+    document.getElementById('recommendationsContent').innerHTML = '';
+    document.getElementById('bestCapacity').innerHTML = '-';
+    document.getElementById('totalRealExps').innerHTML = '-';
+    document.getElementById('improvement').innerHTML = '-';
+}
+</script>
+{% endblock %}

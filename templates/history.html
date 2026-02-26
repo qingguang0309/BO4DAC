@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}History - DAC Material Optimizer{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-12">
+        <h1 class="mb-4">📋 Experiment History</h1>
+
+        <!-- Filters & Export -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4><i class="fas fa-filter me-2"></i>Filters & Export</h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <label for="sessionSelect" class="form-label">Session</label>
+                        <select class="form-select" id="sessionSelect" onchange="loadHistory()">
+                            <option value="">-- Active Session --</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="exportFormat" class="form-label">Export Format</label>
+                        <select class="form-select" id="exportFormat">
+                            <option value="csv">CSV</option>
+                            <option value="json">JSON</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">&nbsp;</label>
+                        <div class="d-grid">
+                            <button class="btn btn-success" onclick="exportHistory()">
+                                <i class="fas fa-file-export me-2"></i>Export
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Table -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0"><i class="fas fa-history me-2"></i>Experimental Records</h4>
+                <span class="badge bg-primary" id="recordCount">0 records</span>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>#</th>
+                                <th>Timestamp</th>
+                                <th>Support</th>
+                                <th>Amine 1</th>
+                                <th>Amine 2</th>
+                                <th>Additive 3</th>
+                                <th>MW (g/mol)</th>
+                                <th>Org. (%)</th>
+                                <th>Predicted</th>
+                                <th>Actual</th>
+                                <th>Error %</th>
+                                <th>Historical</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <tr><td colspan="12" class="text-center py-4">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allExperiments = [];
+let currentSessionId = null;
+
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadSessions();
+    await loadHistory();
+});
+
+async function loadSessions() {
+    const resp = await fetch('/db/sessions');
+    const data = await resp.json();
+    if (data.success) {
+        const select = document.getElementById('sessionSelect');
+        select.innerHTML = '<option value="">-- Active Session --</option>';
+        for (const [sid, sess] of Object.entries(data.sessions)) {
+            select.innerHTML += `<option value="${sid}">${sid.slice(0,8)}… (${sess.status})</option>`;
+        }
+    }
+}
+
+async function loadHistory() {
+    const select = document.getElementById('sessionSelect');
+    let sessionId = select.value;
+    if (!sessionId) {
+        const statusResp = await fetch('/api/get-status');
+        const statusData = await statusResp.json();
+        if (statusData.success) {
+            sessionId = statusData.session_id;
+        } else {
+            document.getElementById('historyTableBody').innerHTML =
+                '<tr><td colspan="12" class="text-center text-muted">No active session</td></tr>';
+            document.getElementById('recordCount').innerText = '0 records';
+            return;
+        }
+    }
+    currentSessionId = sessionId;
+    const resp = await fetch(`/db/experiments?session_id=${sessionId}`);
+    const data = await resp.json();
+    if (data.success) {
+        allExperiments = data.experiments.sort((a,b) =>
+            new Date(b.timestamp) - new Date(a.timestamp));
+        renderTable();
+    }
+}
+
+function renderTable() {
+    const tbody = document.getElementById('historyTableBody');
+    if (!allExperiments.length) {
+        tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted">No experiments</td></tr>';
+        document.getElementById('recordCount').innerText = '0 records';
+        return;
+    }
+    let html = '';
+    allExperiments.forEach((exp, idx) => {
+        const cand = exp.candidate || {};
+        const support = cand.Support || '-';
+        const amine1 = cand.Amine_1_or_Additive_1 || '-';
+        const amine2 = cand.Amine_2_or_Additive_2 || '-';
+        const amine3 = cand.Amine_3_or_Additive_3 || '-';
+        const pred = exp.predicted_performance || 0;
+        const act = exp.experimental_performance || 0;
+        const error = act > 0 ? ((act - pred) / act * 100).toFixed(1) : '-';
+        const errorClass = Math.abs(error) < 10 ? 'text-success' :
+                          Math.abs(error) < 20 ? 'text-warning' : 'text-danger';
+        html += `<tr>
+            <td>${idx+1}</td>
+            <td><small>${exp.timestamp ? new Date(exp.timestamp).toLocaleString() : ''}</small></td>
+            <td>${support}</td>
+            <td>${amine1}</td>
+            <td>${amine2}</td>
+            <td>${amine3}</td>
+            <td>${cand.MW_Mn_g_mol ? cand.MW_Mn_g_mol.toFixed(0) : '-'}</td>
+            <td>${cand.Organic_Content_pct ? cand.Organic_Content_pct.toFixed(1) : '-'}</td>
+            <td>${pred.toFixed(3)}</td>
+            <td><strong>${act.toFixed(3)}</strong></td>
+            <td class="${errorClass}">${error}%</td>
+            <td>${exp.is_historical ? '<span class="badge bg-secondary">Yes</span>' : '<span class="badge bg-primary">Real</span>'}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+    document.getElementById('recordCount').innerText = `${allExperiments.length} records`;
+}
+
+async function exportHistory() {
+    if (!currentSessionId) {
+        alert('No session selected');
+        return;
+    }
+    const format = document.getElementById('exportFormat').value;
+    const url = format === 'csv' ? 
+        `/db/export/csv?session_id=${currentSessionId}` : 
+        `/db/export/json?session_id=${currentSessionId}`;
+    window.open(url, '_blank');
+}
+</script>
+{% endblock %}

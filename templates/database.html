@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{% block title %}Database - DAC Material Optimizer{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-12">
+        <h1 class="mb-4">🗃️ Experiment Database</h1>
+
+        <!-- Statistics Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body text-center">
+                        <h4 id="totalSessions">0</h4>
+                        <p class="mb-0">Total Sessions</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body text-center">
+                        <h4 id="totalExperiments">0</h4>
+                        <p class="mb-0">Total Experiments</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-warning text-white">
+                    <div class="card-body text-center">
+                        <h4 id="activeSessions">0</h4>
+                        <p class="mb-0">Active Sessions</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body text-center">
+                        <h4 id="bestPerformance">0.000</h4>
+                        <p class="mb-0">Best Capacity</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Database Controls -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4>Database Controls</h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 mb-2">
+                        <button class="btn btn-primary w-100" onclick="refreshStats()">
+                            <i class="fas fa-sync-alt me-2"></i>Refresh
+                        </button>
+                    </div>
+                    <div class="col-md-3 mb-2">
+                        <button class="btn btn-success w-100" onclick="createBackup()">
+                            <i class="fas fa-save me-2"></i>Create Backup
+                        </button>
+                    </div>
+                    <div class="col-md-3 mb-2">
+                        <button class="btn btn-warning w-100" onclick="exportAll()">
+                            <i class="fas fa-download me-2"></i>Export All
+                        </button>
+                    </div>
+                    <div class="col-md-3 mb-2">
+                        <button class="btn btn-danger w-100" onclick="if(confirm('Delete ALL sessions? This cannot be undone.')) resetDatabase()">
+                            <i class="fas fa-trash-alt me-2"></i>Reset DB
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sessions List -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">Saved Sessions</h4>
+                <button class="btn btn-sm btn-outline-primary" onclick="loadSessions()">
+                    <i class="fas fa-sync-alt"></i>
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Session ID</th>
+                                <th>Created</th>
+                                <th>Status</th>
+                                <th>Real Exps</th>
+                                <th>Best Capacity</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sessionsTableBody">
+                            <tr><td colspan="6" class="text-center py-4">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    refreshStats();
+    loadSessions();
+});
+
+async function refreshStats() {
+    const resp = await fetch('/db/statistics');
+    const data = await resp.json();
+    if (data.success) {
+        const s = data.statistics;
+        document.getElementById('totalSessions').innerText = s.total_sessions || 0;
+        document.getElementById('totalExperiments').innerText = s.total_experiments || 0;
+        document.getElementById('activeSessions').innerText = s.active_sessions || 0;
+        document.getElementById('bestPerformance').innerText = 
+            (s.best_performance || 0).toFixed(3);
+    }
+}
+
+async function loadSessions() {
+    const resp = await fetch('/db/sessions');
+    const data = await resp.json();
+    const tbody = document.getElementById('sessionsTableBody');
+    if (!data.success) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-danger">Error loading sessions</td></tr>';
+        return;
+    }
+    const sessions = data.sessions || {};
+    if (Object.keys(sessions).length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No sessions found</td></tr>';
+        return;
+    }
+    let html = '';
+    for (const [sid, sess] of Object.entries(sessions)) {
+        const created = sess.created_at ? new Date(sess.created_at).toLocaleDateString() : '-';
+        const statusClass = sess.status === 'running' ? 'success' : 
+                           sess.status === 'completed' ? 'info' : 'secondary';
+        const expCount = sess.experiments ? sess.experiments.length : 0;
+        html += `
+            <tr>
+                <td><strong>${sid.slice(0,12)}…</strong></td>
+                <td>${created}</td>
+                <td><span class="badge bg-${statusClass}">${sess.status || 'unknown'}</span></td>
+                <td>${expCount}</td>
+                <td>${(sess.best_capacity || 0).toFixed(3)} mmol/g</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewSession('${sid}')">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-success" onclick="exportSession('${sid}')">
+                        <i class="fas fa-download"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    }
+    tbody.innerHTML = html;
+}
+
+async function createBackup() {
+    const resp = await fetch('/db/backup', { method: 'POST' });
+    const data = await resp.json();
+    alert(data.success ? 'Backup created successfully' : 'Backup failed');
+}
+
+function exportAll() {
+    window.open('/db/export/json', '_blank');
+}
+
+function exportSession(sid) {
+    window.open(`/db/export/json?session_id=${sid}`, '_blank');
+}
+
+function viewSession(sid) {
+    // Could navigate to a session detail page; for now just alert.
+    alert(`Session ${sid} selected. Detailed view would open here.`);
+}
+
+async function resetDatabase() {
+    // This endpoint is not implemented by default; we call /api/reset-system? Actually that resets only current session.
+    // We'll add a hidden admin endpoint? For now, just warn.
+    alert('To reset the whole database, delete the files in data/database/ manually.');
+}
+</script>
+{% endblock %}

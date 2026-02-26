@@ -1,0 +1,35 @@
+{
+  "numerical_columns": [
+    "MW_Mn_g_mol",
+    "Organic_Content_pct"
+  ],
+  "categorical_columns": [
+    "Support",
+    "Amine_1_or_Additive_1",
+    "Amine_2_or_Additive_2",
+    "Amine_3_or_Additive_3"
+  ],
+  "target_columns": [
+    "CO2_Capacity_mmol_g"
+  ],
+  "bounds": {
+    "MW_Mn_g_mol": [0, 20000],
+    "Organic_Content_pct": [0, 100]
+  },
+  "operational_columns": [
+    "Relative_Humidity_pct",
+    "CO2_Concentration_vol_pct",
+    "Flow_Rate_mL_min",
+    "Adsorption_Temperature_C",
+    "CO2_Test_Method"
+  ],
+  "optimization": {
+    "default_model_type": "gaussian_process",
+    "default_n_candidates": 1000,
+    "default_xi": 0.01,
+    "default_confidence": 0.95
+  },
+  "encoders_load_path": "encoders/label_encoders.pkl",
+  "encoders_save_path": "encoders/label_encoders.pkl",
+  "default_DAC_data_path": "data/historical_experiments.csv"
+}
