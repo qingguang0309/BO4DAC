@@ -1,1995 +1,1243 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DAC Material Optimizer - 4-Step Process</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css">
-    <style>
-        :root {
-            --primary-color: #2c3e50;
-            --secondary-color: #3498db;
-            --success-color: #27ae60;
-            --warning-color: #f39c12;
-            --danger-color: #e74c3c;
-            --step-active: #3498db;
-            --step-completed: #27ae60;
-            --step-pending: #95a5a6;
-        }
+{% extends "base.html" %}
 
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            padding-bottom: 50px;
-        }
+{% block title %}4‑Step Optimizer - DAC Material Optimizer{% endblock %}
 
-        .navbar {
-            background: linear-gradient(135deg, var(--primary-color) 0%, #34495e 100%);
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
+{% block styles %}
+<style>
+    /* Step Navigation */
+    .step-navigation {
+        display: flex;
+        justify-content: space-between;
+        margin: 30px 0;
+        position: relative;
+    }
+    .step-navigation:before {
+        content: '';
+        position: absolute;
+        top: 25px;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background-color: #ecf0f1;
+        z-index: 1;
+    }
+    .step {
+        position: relative;
+        z-index: 2;
+        text-align: center;
+        flex: 1;
+    }
+    .step-circle {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background-color: white;
+        border: 3px solid #95a5a6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 10px;
+        font-weight: bold;
+        color: #95a5a6;
+        transition: all 0.3s;
+    }
+    .step.active .step-circle {
+        border-color: #3498db;
+        background-color: #3498db;
+        color: white;
+    }
+    .step.completed .step-circle {
+        border-color: #27ae60;
+        background-color: #27ae60;
+        color: white;
+    }
+    .step-label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #95a5a6;
+    }
+    .step.active .step-label { color: #3498db; }
+    .step.completed .step-label { color: #27ae60; }
+    .step-content { display: none; }
+    .step-content.active { display: block; animation: fadeIn 0.5s; }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
 
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            transition: transform 0.3s;
-        }
+    /* Multi-select items - improved for long amine names */
+    .multi-select-item {
+        padding: 6px 10px;
+        margin: 3px 0;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        font-size: 0.85rem;
+        line-height: 1.2;
+    }
+    .multi-select-item:hover { background-color: #f8f9fa; }
+    .multi-select-item.selected {
+        background-color: #3498db;
+        color: white;
+    }
 
-        .card:hover {
-            transform: translateY(-2px);
-        }
+    /* Multi-select containers: scrollable with max-height */
+    .multi-select-container {
+        max-height: 250px;
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        padding: 8px;
+        border-radius: 4px;
+    }
 
-        .card-header {
-            background-color: white;
-            border-bottom: 2px solid var(--secondary-color);
-            font-weight: 600;
-        }
+    /* Config badges */
+    .config-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        margin: 3px;
+        background-color: #e8f4fc;
+        border: 1px solid #b3dcf9;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        cursor: pointer;
+    }
+    .config-badge.selected {
+        background-color: #3498db;
+        color: white;
+    }
 
-        .btn-primary {
-            background-color: var(--secondary-color);
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-        }
+    /* Condition cards */
+    .condition-card {
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+        cursor: pointer;
+    }
+    .condition-card.selected {
+        border-color: #3498db;
+        background-color: #e8f4fc;
+    }
 
-        .btn-primary:hover {
-            background-color: #2980b9;
-        }
+    /* Candidate cards */
+    .best-experiment-card { border-left: 4px solid #27ae60; }
+    .candidate-card { border-left: 4px solid #3498db; }
+    .parameter-item {
+        background: white;
+        padding: 0.75rem;
+        border-radius: 6px;
+        border: 1px solid #dee2e6;
+    }
 
-        /* Step Navigation */
-        .step-navigation {
-            display: flex;
-            justify-content: space-between;
-            margin: 30px 0;
-            position: relative;
-        }
+    /* Chart image responsive */
+    #optimizationChartImg {
+        max-width: 100%;
+        max-height: 300px;
+        object-fit: contain;
+    }
 
-        .step-navigation:before {
-            content: '';
-            position: absolute;
-            top: 25px;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background-color: #ecf0f1;
-            z-index: 1;
-        }
+    /* Loading overlay */
+    #loadingOverlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255,255,255,0.8);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        flex-direction: column;
+    }
+    .spinner {
+        border: 5px solid #f3f3f3;
+        border-top: 5px solid #3498db;
+        border-radius: 50%;
+        width: 50px;
+        height: 50px;
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
 
-        .step {
-            position: relative;
-            z-index: 2;
-            text-align: center;
-            flex: 1;
-        }
+    /* Notification */
+    .notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        background-color: #3498db;
+        color: white;
+        border-radius: 5px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        z-index: 10000;
+        display: none;
+    }
+    .notification.success { background-color: #27ae60; }
+    .notification.error { background-color: #e74c3c; }
+    .notification.warning { background-color: #f39c12; }
+</style>
+{% endblock %}
 
-        .step-circle {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background-color: white;
-            border: 3px solid var(--step-pending);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 auto 10px;
-            font-weight: bold;
-            color: var(--step-pending);
-            transition: all 0.3s;
-        }
+{% block content %}
+<!-- Loading Overlay -->
+<div id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="mt-3 text-primary">Loading...</div>
+</div>
 
-        .step.active .step-circle {
-            border-color: var(--step-active);
-            background-color: var(--step-active);
-            color: white;
-        }
+<!-- Notification -->
+<div id="notification" class="notification"></div>
 
-        .step.completed .step-circle {
-            border-color: var(--step-completed);
-            background-color: var(--step-completed);
-            color: white;
-        }
-
-        .step-label {
-            font-size: 0.9rem;
-            font-weight: 600;
-            color: var(--step-pending);
-        }
-
-        .step.active .step-label {
-            color: var(--step-active);
-        }
-
-        .step.completed .step-label {
-            color: var(--step-completed);
-        }
-
-        .step-content {
-            display: none;
-        }
-
-        .step-content.active {
-            display: block;
-            animation: fadeIn 0.5s;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* Configuration Badges */
-        .config-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 6px 12px;
-            margin: 3px;
-            background-color: #e8f4fc;
-            border: 1px solid #b3dcf9;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .config-badge:hover {
-            background-color: #d4eaf9;
-            transform: translateY(-2px);
-        }
-
-        .config-badge.selected {
-            background-color: var(--secondary-color);
-            color: white;
-            border-color: var(--secondary-color);
-        }
-
-        .config-badge .badge-check {
-            display: none;
-            margin-left: 5px;
-        }
-
-        .config-badge.selected .badge-check {
-            display: inline-block;
-        }
-
-        /* Range Sliders */
-        .range-slider-container {
-            padding: 20px;
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            margin: 15px 0;
-        }
-
-        .range-values {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 10px;
-            font-weight: 600;
-            color: var(--primary-color);
-        }
-
-        /* Condition Cards */
-        .condition-card {
-            border: 2px solid #e9ecef;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
-            transition: all 0.3s;
-            cursor: pointer;
-        }
-
-        .condition-card:hover {
-            border-color: var(--secondary-color);
-            background-color: #f8f9fa;
-        }
-
-        .condition-card.selected {
-            border-color: var(--secondary-color);
-            background-color: #e8f4fc;
-        }
-
-        .condition-value {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--primary-color);
-        }
-
-        .condition-unit {
-            font-size: 0.9rem;
-            color: #6c757d;
-        }
-
-        /* Loading Overlay */
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0,0,0,0.7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            display: none;
-        }
-
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid var(--secondary-color);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* Notification */
-        .notification {
-            position: fixed;
-            top: 80px;
-            right: 20px;
-            z-index: 1000;
-            min-width: 300px;
-            display: none;
-        }
-
-        /* Summary Panel */
-        .summary-item {
-            padding: 10px;
-            border-bottom: 1px solid #e9ecef;
-        }
-
-        .summary-item:last-child {
-            border-bottom: none;
-        }
-
-        .summary-label {
-            font-weight: 600;
-            color: #6c757d;
-        }
-
-        .summary-value {
-            font-weight: 500;
-            color: var(--primary-color);
-        }
-
-        /* Multi-select */
-        .multi-select-container {
-            max-height: 200px;
-            overflow-y: auto;
-            border: 1px solid #dee2e6;
-            border-radius: 5px;
-            padding: 10px;
-            margin-top: 10px;
-        }
-
-        .multi-select-item {
-            padding: 5px 10px;
-            margin: 2px 0;
-            border-radius: 3px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        .multi-select-item:hover {
-            background-color: #f8f9fa;
-        }
-
-        .multi-select-item.selected {
-            background-color: var(--secondary-color);
-            color: white;
-        }
-
-        /* Capacity Value */
-        .capacity-value {
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: var(--primary-color);
-        }
-
-        /* Candidate Card */
-        .candidate-card {
-            border-left: 4px solid var(--secondary-color);
-        }
-
-        .best-candidate {
-            border-left: 4px solid var(--success-color);
-            background-color: rgba(39, 174, 96, 0.05);
-        }
-
-        /* Experiment History */
-        .experiment-history {
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        /* Model Metrics */
-        .model-metrics {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-top: 15px;
-        }
-
-        .metric-card {
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            text-align: center;
-        }
-
-        .metric-value {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: var(--primary-color);
-        }
-
-        .metric-label {
-            font-size: 0.8rem;
-            color: #6c757d;
-            margin-top: 3px;
-        }
-
-        /* Responsive Adjustments */
-        @media (max-width: 768px) {
-            .step-navigation {
-                flex-direction: column;
-                gap: 20px;
-            }
-
-            .step-navigation:before {
-                display: none;
-            }
-
-            .step {
-                display: flex;
-                align-items: center;
-                text-align: left;
-            }
-
-            .step-circle {
-                margin: 0 15px 0 0;
-            }
-
-            .model-metrics {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        /* Chart container improvements */
-        #optimizationChartImg {
-            width: 100%;
-            max-height: 300px;
-            object-fit: contain;
-            background-color: #ffffff;
-            border-radius: 8px;
-            padding: 10px;
-        }
-
-        @media (max-width: 768px) {
-            #optimizationChartImg {
-                max-height: 250px;
-            }
-        }
-
-        /* Table styles for historical records */
-        .historical-table {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-
-        /* Best experiment card */
-        .best-experiment-card {
-            background-color: rgba(39, 174, 96, 0.1);
-            border-left: 4px solid var(--success-color);
-        }
-    </style>
-</head>
-<body>
-    <!-- Loading Overlay -->
-    <div class="loading-overlay" id="loadingOverlay">
-        <div class="spinner"></div>
+<!-- Step Navigation -->
+<div class="step-navigation">
+    <div class="step active" id="step1">
+        <div class="step-circle">1</div>
+        <div class="step-label">Set Search Bounds</div>
     </div>
-
-    <!-- Notification -->
-    <div class="notification alert alert-success alert-dismissible fade show" role="alert" id="notification">
-        <span id="notificationMessage"></span>
-        <button type="button" class="btn-close" onclick="hideNotification()"></button>
+    <div class="step" id="step2">
+        <div class="step-circle">2</div>
+        <div class="step-label">Set Conditions</div>
     </div>
+    <div class="step" id="step3">
+        <div class="step-circle">3</div>
+        <div class="step-label">Submit Historical Records</div>
+    </div>
+    <div class="step" id="step4">
+        <div class="step-circle">4</div>
+        <div class="step-label">Optimization</div>
+    </div>
+</div>
 
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container">
-            <a class="navbar-brand" href="#">
-                <i class="bi bi-cloud-fog me-2"></i>
-                DAC Material Optimizer
-            </a>
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link" href="/experimental-form">
-                    <i class="bi bi-file-earmark-plus me-1"></i>Submit Results
-                </a>
-                <div class="navbar-text ms-3">
-                    <span class="badge bg-light text-dark" id="systemStatusBadge">Setup Required</span>
+<!-- ========= STEP 1: SEARCH BOUNDS ========= -->
+<div class="step-content active" id="step1Content">
+    <div class="card">
+        <div class="card-header"><i class="fas fa-bounding-box me-2"></i>Step 1: Define Search Space Bounds</div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <h5>Support Materials</h5>
+                    <div class="multi-select-container" id="supportsContainer"></div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="selectAll('supports')">Select All</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('supports')">Deselect All</button>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <h5>Amine 1 / Additive 1</h5>
+                    <div class="multi-select-container" id="amine1Container"></div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="selectAll('amine1')">Select All</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('amine1')">Deselect All</button>
+                    </div>
+                    <h5 class="mt-4">Amine 2 / Additive 2</h5>
+                    <div class="multi-select-container" id="amine2Container"></div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-primary" onclick="selectAll('amine2')">Select All</button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('amine2')">Deselect All</button>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <h5>Molecular Weight Range (g/mol)</h5>
+                    <div class="range-slider-container">
+                        <input type="range" class="form-range" min="0" max="20000" step="100" id="mwMinSlider">
+                        <input type="range" class="form-range" min="0" max="20000" step="100" id="mwMaxSlider">
+                        <div class="range-values d-flex justify-content-between">
+                            <span id="mwMinValue">0</span> g/mol
+                            <span id="mwMaxValue">10000</span> g/mol
+                        </div>
+                    </div>
+                    <h5 class="mt-4">Organic Content Range (%)</h5>
+                    <div class="range-slider-container">
+                        <input type="range" class="form-range" min="0" max="100" step="1" id="ocMinSlider">
+                        <input type="range" class="form-range" min="0" max="100" step="1" id="ocMaxSlider">
+                        <div class="range-values d-flex justify-content-between">
+                            <span id="ocMinValue">0</span> %
+                            <span id="ocMaxValue">100</span> %
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-    </nav>
-
-    <div class="container mt-4">
-        <!-- Step Navigation -->
-        <div class="step-navigation">
-            <div class="step active" id="step1">
-                <div class="step-circle">1</div>
-                <div class="step-label">Set Search Bounds</div>
+            <!-- Additive 3 (badge style) -->
+            <div class="mt-3">
+                <h5>Additive 3</h5>
+                <div id="additive3Container"></div>
             </div>
-            <div class="step" id="step2">
-                <div class="step-circle">2</div>
-                <div class="step-label">Set Conditions</div>
-            </div>
-            <div class="step" id="step3">
-                <div class="step-circle">3</div>
-                <div class="step-label">Submit Historical Records</div>
-            </div>
-            <div class="step" id="step4">
-                <div class="step-circle">4</div>
-                <div class="step-label">Optimization</div>
-            </div>
-        </div>
-
-        <!-- Step 1: Set Search Bounds -->
-        <div class="step-content active" id="step1Content">
-            <div class="card">
-                <div class="card-header">
-                    <i class="bi bi-bounding-box me-2"></i>Step 1: Define Search Space Bounds
-                </div>
+            <!-- Summary -->
+            <div class="card mt-4">
+                <div class="card-header"><i class="fas fa-list-check me-2"></i>Search Space Summary</div>
                 <div class="card-body">
                     <div class="row">
-                        <!-- Left Column: Support Materials -->
-                        <div class="col-md-4">
-                            <div class="mb-4">
-                                <h5>Support Materials</h5>
-                                <p class="text-muted small">Select support materials to include in search</p>
-                                <div class="multi-select-container" id="supportsContainer"></div>
-                                <div class="mt-2">
-                                    <button class="btn btn-sm btn-outline-primary" onclick="selectAll('supports')">Select All</button>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('supports')">Deselect All</button>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h5>Additive 3</h5>
-                                <p class="text-muted small">Select additive options</p>
-                                <div id="additive3Container"></div>
-                            </div>
+                        <div class="col-md-3"><strong>Supports:</strong> <span id="summarySupports">0 selected</span></div>
+                        <div class="col-md-3"><strong>Amine 1:</strong> <span id="summaryAmine1">0 selected</span></div>
+                        <div class="col-md-3"><strong>Amine 2:</strong> <span id="summaryAmine2">0 selected</span></div>
+                        <div class="col-md-3"><strong>Additive 3:</strong> <span id="summaryAdditive3">0 selected</span></div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-6"><strong>MW Range:</strong> <span id="summaryMWRange">0 - 10000</span> g/mol</div>
+                        <div class="col-md-6"><strong>Organic Content:</strong> <span id="summaryOCRange">0 - 100</span> %</div>
+                    </div>
+                </div>
+            </div>
+            <div class="text-end mt-4">
+                <button class="btn btn-primary" onclick="goToStep(2)">Continue to Step 2 <i class="fas fa-arrow-right ms-2"></i></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========= STEP 2: CONDITIONS ========= -->
+<div class="step-content" id="step2Content">
+    <div class="card">
+        <div class="card-header"><i class="fas fa-sliders me-2"></i>Step 2: Set Experimental Conditions</div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="condition-card" onclick="selectCondition('co2')" id="co2Card">
+                        <div class="d-flex justify-content-between">
+                            <div><h6>CO₂ Concentration</h6></div>
+                            <div><span class="condition-value" id="co2Value">0.04</span> vol%</div>
                         </div>
-                        <!-- Middle Column: Amines/Additives -->
-                        <div class="col-md-4">
-                            <div class="mb-4">
-                                <h5>Amine 1 / Additive 1</h5>
-                                <p class="text-muted small">Primary amines or additives to include</p>
-                                <div class="multi-select-container" id="amine1Container"></div>
-                                <div class="mt-2">
-                                    <button class="btn btn-sm btn-outline-primary" onclick="selectAll('amine1')">Select All</button>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('amine1')">Deselect All</button>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h5>Amine 2 / Additive 2</h5>
-                                <p class="text-muted small">Secondary amines or additives to include</p>
-                                <div class="multi-select-container" id="amine2Container"></div>
-                                <div class="mt-2">
-                                    <button class="btn btn-sm btn-outline-primary" onclick="selectAll('amine2')">Select All</button>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('amine2')">Deselect All</button>
-                                </div>
-                            </div>
-                        </div>
-                        <!-- Right Column: Continuous Parameters -->
-                        <div class="col-md-4">
-                            <div class="mb-4">
-                                <h5>Molecular Weight Range</h5>
-                                <p class="text-muted small">Set bounds for MW_Mn (g/mol)</p>
-                                <div class="range-slider-container">
-                                    <input type="range" class="form-range" min="0" max="20000" step="100" id="mwMinSlider" value="0">
-                                    <input type="range" class="form-range" min="0" max="20000" step="100" id="mwMaxSlider" value="10000">
-                                    <div class="range-values">
-                                        <span id="mwMinValue">0</span> g/mol
-                                        <span id="mwMaxValue">10000</span> g/mol
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="mb-4">
-                                <h5>Organic Content Range</h5>
-                                <p class="text-muted small">Set bounds for Organic Content (%)</p>
-                                <div class="range-slider-container">
-                                    <input type="range" class="form-range" min="0" max="100" step="1" id="ocMinSlider" value="0">
-                                    <input type="range" class="form-range" min="0" max="100" step="1" id="ocMaxSlider" value="100">
-                                    <div class="range-values">
-                                        <span id="ocMinValue">0</span> %
-                                        <span id="ocMaxValue">100</span> %
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="alert alert-info">
-                                <small>
-                                    <i class="bi bi-info-circle"></i>
-                                    These bounds define the search space for the optimization algorithm.
-                                    Narrower bounds can speed up convergence but may exclude optimal solutions.
-                                </small>
-                            </div>
+                        <div id="co2Controls" style="display:none;">
+                            <input type="range" min="0.01" max="20" step="0.01" id="co2Slider" value="0.04" oninput="updateCo2Value(this.value)">
                         </div>
                     </div>
-                    <!-- Search Space Summary -->
-                    <div class="card mt-4">
-                        <div class="card-header">
-                            <i class="bi bi-list-check me-2"></i>Search Space Summary
+                    <div class="condition-card" onclick="selectCondition('temperature')" id="temperatureCard">
+                        <div class="d-flex justify-content-between">
+                            <div><h6>Temperature</h6></div>
+                            <div><span class="condition-value" id="temperatureValue">25.0</span> °C</div>
                         </div>
+                        <div id="temperatureControls" style="display:none;">
+                            <input type="range" min="-20" max="100" step="0.1" id="temperatureSlider" value="25.0" oninput="updateTemperatureValue(this.value)">
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="condition-card" onclick="selectCondition('humidity')" id="humidityCard">
+                        <div class="d-flex justify-content-between">
+                            <div><h6>Relative Humidity</h6></div>
+                            <div><span class="condition-value" id="humidityValue">0</span> %</div>
+                        </div>
+                        <div id="humidityControls" style="display:none;">
+                            <input type="range" min="0" max="100" step="1" id="humiditySlider" value="0" oninput="updateHumidityValue(this.value)">
+                        </div>
+                    </div>
+                    <div class="condition-card" onclick="selectCondition('flowRate')" id="flowRateCard">
+                        <div class="d-flex justify-content-between">
+                            <div><h6>Flow Rate</h6></div>
+                            <div><span class="condition-value" id="flowRateValue">100.0</span> mL/min</div>
+                        </div>
+                        <div id="flowRateControls" style="display:none;">
+                            <input type="range" min="10" max="500" step="5" id="flowRateSlider" value="100.0" oninput="updateFlowRateValue(this.value)">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Test Method -->
+            <div class="card mt-4">
+                <div class="card-header"><i class="fas fa-clipboard-data me-2"></i>Test Method</div>
+                <div class="card-body">
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="testMethod" id="tgaMethod" value="TGA" checked>
+                        <label class="form-check-label" for="tgaMethod">TGA</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="testMethod" id="breakthroughMethod" value="Breakthrough">
+                        <label class="form-check-label" for="breakthroughMethod">Breakthrough</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="testMethod" id="otherMethod" value="Other">
+                        <label class="form-check-label" for="otherMethod">Other</label>
+                    </div>
+                </div>
+            </div>
+            <!-- Conditions Summary -->
+            <div class="card mt-4">
+                <div class="card-header"><i class="fas fa-clipboard-check me-2"></i>Conditions Summary</div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3"><strong>CO₂:</strong> <span id="finalCo2">0.04 vol%</span></div>
+                        <div class="col-md-3"><strong>Temp:</strong> <span id="finalTemperature">25.0 °C</span></div>
+                        <div class="col-md-3"><strong>Humidity:</strong> <span id="finalHumidity">0 %</span></div>
+                        <div class="col-md-3"><strong>Flow:</strong> <span id="finalFlowRate">100.0 mL/min</span></div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-md-12"><strong>Test Method:</strong> <span id="finalTestMethod">TGA</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-between mt-4">
+                <button class="btn btn-outline-secondary" onclick="goToStep(1)"><i class="fas fa-arrow-left me-2"></i>Back</button>
+                <button class="btn btn-primary" onclick="goToStep(3)">Continue to Step 3 <i class="fas fa-arrow-right ms-2"></i></button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========= STEP 3: HISTORICAL RECORDS ========= -->
+<div class="step-content" id="step3Content">
+    <div class="card">
+        <div class="card-header"><i class="fas fa-file-spreadsheet me-2"></i>Step 3: Submit Historical Records</div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">Upload CSV</div>
                         <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-3"><div class="summary-item"><div class="summary-label">Supports</div><div class="summary-value" id="summarySupports">0 selected</div></div></div>
-                                <div class="col-md-3"><div class="summary-item"><div class="summary-label">Amine 1</div><div class="summary-value" id="summaryAmine1">0 selected</div></div></div>
-                                <div class="col-md-3"><div class="summary-item"><div class="summary-label">Amine 2</div><div class="summary-value" id="summaryAmine2">0 selected</div></div></div>
-                                <div class="col-md-3"><div class="summary-item"><div class="summary-label">Additive 3</div><div class="summary-value" id="summaryAdditive3">0 selected</div></div></div>
-                            </div>
-                            <div class="row mt-3">
-                                <div class="col-md-6"><div class="summary-item"><div class="summary-label">MW Range</div><div class="summary-value" id="summaryMWRange">0 - 10000 g/mol</div></div></div>
-                                <div class="col-md-6"><div class="summary-item"><div class="summary-label">Organic Content Range</div><div class="summary-value" id="summaryOCRange">0 - 100 %</div></div></div>
-                            </div>
+                            <input type="file" class="form-control mb-3" id="historicalFile" accept=".csv">
+                            <button class="btn btn-primary w-100" onclick="uploadHistoricalData()">
+                                <i class="fas fa-cloud-upload me-2"></i>Upload & Process
+                            </button>
                         </div>
                     </div>
-                    <div class="text-end mt-4">
-                        <button class="btn btn-primary" onclick="goToStep(2)">
-                            Continue to Step 2
-                            <i class="bi bi-arrow-right ms-2"></i>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">Add Individual Record</div>
+                        <div class="card-body">
+                            <select id="exp-support" class="form-select mb-2"><option value="">Support</option></select>
+                            <select id="exp-amine1" class="form-select mb-2"><option value="">Amine 1</option></select>
+                            <select id="exp-amine2" class="form-select mb-2"><option value="No">No</option></select>
+                            <select id="exp-additive3" class="form-select mb-2"><option value="No">No</option></select>
+                            <input type="number" id="exp-mw" class="form-control mb-2" placeholder="MW (g/mol)" step="0.1">
+                            <input type="number" id="exp-oc" class="form-control mb-2" placeholder="Organic Content (%)" step="0.1">
+                            <input type="number" id="exp-capacity" class="form-control mb-2" placeholder="CO₂ Capacity (mmol/g)" step="0.01">
+                            <button class="btn btn-success w-100" onclick="addIndividualRecord()">
+                                <i class="fas fa-plus me-2"></i>Add Record
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Records Table -->
+            <div class="card mt-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-table me-2"></i>Uploaded Records</span>
+                    <span id="recordCount" class="badge bg-primary">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Support</th>
+                                    <th>Amine1</th>
+                                    <th>Amine2</th>
+                                    <th>Add3</th>
+                                    <th>MW</th>
+                                    <th>OC%</th>
+                                    <th>Capacity</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="historicalRecordsTable">
+                                <tr><td colspan="8" class="text-center text-muted">No records</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="text-end mt-3">
+                        <button class="btn btn-success" onclick="submitHistoricalRecords()">
+                            <i class="fas fa-database-check me-2"></i>Initialize System
                         </button>
                     </div>
                 </div>
             </div>
+            <div class="d-flex justify-content-between mt-4">
+                <button class="btn btn-outline-secondary" onclick="goToStep(2)"><i class="fas fa-arrow-left me-2"></i>Back</button>
+                <button class="btn btn-primary" onclick="initializeSystem()"><i class="fas fa-check-circle me-2"></i>Initialize System</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========= STEP 4: OPTIMIZATION ========= -->
+<div class="step-content" id="step4Content">
+    <div class="row">
+        <!-- Left Column: Status & Best Experiment -->
+        <div class="col-md-3">
+            <div class="card mb-3">
+                <div class="card-header"><i class="fas fa-speedometer me-2"></i>Optimization Status</div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-6"><span class="display-6 text-primary" id="modelAccuracy">0.000</span><br><small>Best Capacity</small></div>
+                        <div class="col-6"><span class="display-6 text-success" id="iterationCount">0</span><br><small>Iterations</small></div>
+                    </div>
+                    <div class="row text-center mt-3">
+                        <div class="col-6"><span class="display-6 text-info" id="realExperiments">0</span><br><small>Real Exps</small></div>
+                        <div class="col-6"><span class="display-6 text-warning" id="dataPoints">0</span><br><small>Data Points</small></div>
+                    </div>
+                    <div class="mt-4">
+                        <button class="btn btn-primary w-100 mb-2" onclick="generateCandidates()">
+                            <i class="fas fa-magic me-2"></i>Generate Top Candidate
+                        </button>
+                        <button class="btn btn-success w-100 mb-2" onclick="recordExperiment()">
+                            <i class="fas fa-plus-circle me-2"></i>Input Result
+                        </button>
+                        <a href="{{ url_for('experimental_form') }}" class="btn btn-outline-primary w-100">
+                            <i class="fas fa-file-upload me-2"></i>Bulk Entry
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <!-- Best Experiment Card -->
+            <div class="card mb-3 best-experiment-card" id="bestExperimentCard" style="display:none;">
+                <div class="card-header bg-success text-white">
+                    <i class="fas fa-trophy me-2"></i>Best Experiment
+                </div>
+                <div class="card-body" id="bestExperimentContent"></div>
+            </div>
         </div>
 
-        <!-- Step 2: Set Experimental Conditions -->
-        <div class="step-content" id="step2Content">
-            <div class="card">
-                <div class="card-header">
-                    <i class="bi bi-sliders me-2"></i>Step 2: Set Experimental Conditions
+        <!-- Middle Column: Optimization Progress & Top Candidates -->
+        <div class="col-md-6">
+            <div class="card mb-3">
+                <div class="card-header"><i class="fas fa-chart-line me-2"></i>Optimization Progress</div>
+                <div class="card-body text-center">
+                    <img id="optimizationChartImg" src="" alt="Optimization Chart" style="max-width:100%; max-height:300px;">
                 </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="condition-card" onclick="selectCondition('co2')" id="co2Card">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div><h6>CO₂ Concentration</h6><p class="text-muted small mb-0">Volume percentage of CO₂ in gas stream</p></div>
-                                    <div class="text-end"><div class="condition-value" id="co2Value">0.04</div><div class="condition-unit">vol %</div></div>
-                                </div>
-                                <div class="mt-3" id="co2Controls" style="display: none;">
-                                    <input type="range" class="form-range" min="0.01" max="20" step="0.01" id="co2Slider" value="0.04" oninput="updateCo2Value(this.value)">
-                                    <div class="d-flex justify-content-between"><small>0.01%</small><small>20%</small></div>
-                                </div>
-                            </div>
-                            <div class="condition-card" onclick="selectCondition('temperature')" id="temperatureCard">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div><h6>Temperature</h6><p class="text-muted small mb-0">Adsorption temperature</p></div>
-                                    <div class="text-end"><div class="condition-value" id="temperatureValue">25.0</div><div class="condition-unit">°C</div></div>
-                                </div>
-                                <div class="mt-3" id="temperatureControls" style="display: none;">
-                                    <input type="range" class="form-range" min="-20" max="100" step="0.1" id="temperatureSlider" value="25.0" oninput="updateTemperatureValue(this.value)">
-                                    <div class="d-flex justify-content-between"><small>-20°C</small><small>100°C</small></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="condition-card" onclick="selectCondition('humidity')" id="humidityCard">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div><h6>Relative Humidity</h6><p class="text-muted small mb-0">Relative humidity percentage</p></div>
-                                    <div class="text-end"><div class="condition-value" id="humidityValue">0</div><div class="condition-unit">%</div></div>
-                                </div>
-                                <div class="mt-3" id="humidityControls" style="display: none;">
-                                    <input type="range" class="form-range" min="0" max="100" step="1" id="humiditySlider" value="0" oninput="updateHumidityValue(this.value)">
-                                    <div class="d-flex justify-content-between"><small>0%</small><small>100%</small></div>
-                                </div>
-                            </div>
-                            <div class="condition-card" onclick="selectCondition('flowRate')" id="flowRateCard">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div><h6>Flow Rate</h6><p class="text-muted small mb-0">Gas flow rate</p></div>
-                                    <div class="text-end"><div class="condition-value" id="flowRateValue">100.0</div><div class="condition-unit">mL/min</div></div>
-                                </div>
-                                <div class="mt-3" id="flowRateControls" style="display: none;">
-                                    <input type="range" class="form-range" min="10" max="500" step="5" id="flowRateSlider" value="100.0" oninput="updateFlowRateValue(this.value)">
-                                    <div class="d-flex justify-content-between"><small>10 mL/min</small><small>500 mL/min</small></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Test Method Selection -->
-                    <div class="card mt-4">
-                        <div class="card-header"><i class="bi bi-clipboard-data me-2"></i>Test Method</div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-4">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="testMethod" id="tgaMethod" value="TGA" checked>
-                                        <label class="form-check-label" for="tgaMethod"><strong>TGA</strong><br><small class="text-muted">Thermogravimetric Analysis</small></label>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="testMethod" id="breakthroughMethod" value="BET">
-                                        <label class="form-check-label" for="breakthroughMethod"><strong>Breakthrough</strong><br><small class="text-muted">Column breakthrough testing</small></label>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="testMethod" id="otherMethod" value="Other">
-                                        <label class="form-check-label" for="otherMethod"><strong>Other</strong><br><small class="text-muted">Custom test method</small></label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Conditions Summary -->
-                    <div class="card mt-4">
-                        <div class="card-header"><i class="bi bi-clipboard-check me-2"></i>Experimental Conditions Summary</div>
-                        <div class="card-body">
-                            <div class="row">
-                                <div class="col-md-3"><div class="summary-item"><div class="summary-label">CO₂ Concentration</div><div class="summary-value" id="finalCo2">0.04 vol %</div></div></div>
-                                <div class="col-md-3"><div class="summary-item"><div class="summary-label">Temperature</div><div class="summary-value" id="finalTemperature">25.0 °C</div></div></div>
-                                <div class="col-md-3"><div class="summary-item"><div class="summary-label">Humidity</div><div class="summary-value" id="finalHumidity">0 %</div></div></div>
-                                <div class="col-md-3"><div class="summary-item"><div class="summary-label">Flow Rate</div><div class="summary-value" id="finalFlowRate">100.0 mL/min</div></div></div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-12"><div class="summary-item"><div class="summary-label">Test Method</div><div class="summary-value" id="finalTestMethod">TGA</div></div></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="d-flex justify-content-between mt-4">
-                        <button class="btn btn-outline-secondary" onclick="goToStep(1)"><i class="bi bi-arrow-left me-2"></i>Back to Step 1</button>
-                        <button class="btn btn-primary" onclick="goToStep(3)">Continue to Step 3<i class="bi bi-arrow-right ms-2"></i></button>
-                    </div>
+            </div>
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <span><i class="fas fa-list-ol me-2"></i>Top Candidates</span>
+                    <span class="badge bg-info" id="candidateCount">0</span>
+                </div>
+                <div class="card-body" id="candidatesContainer">
+                    <div class="text-center text-muted p-4">Generate candidates to see details</div>
                 </div>
             </div>
         </div>
 
-        <!-- Step 3: Submit Historical Records -->
-        <div class="step-content" id="step3Content">
-            <div class="card">
-                <div class="card-header"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Step 3: Submit Historical Records</div>
-                <div class="card-body">
-                    <div class="alert alert-info"><i class="bi bi-info-circle me-2"></i>Upload your historical experimental data to train the optimization model. This will help the AI make better predictions based on your previous results.</div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="card mb-4">
-                                <div class="card-header"><i class="bi bi-upload me-2"></i>Upload Historical Data</div>
-                                <div class="card-body">
-                                    <div class="mb-3">
-                                        <label for="historicalFile" class="form-label">Upload CSV file with historical data</label>
-                                        <input type="file" class="form-control" id="historicalFile" accept=".csv">
-                                        <div class="form-text">Upload a CSV file containing your historical experimental data with columns: Support, Amine_1_or_Additive_1, Amine_2_or_Additive_2, Amine_3_or_Additive_3, MW_Mn_g_mol, Organic_Content_pct, CO2_Capacity_mmol_g</div>
-                                    </div>
-                                    <div class="mb-3"><button class="btn btn-primary" onclick="uploadHistoricalData()"><i class="bi bi-cloud-upload me-2"></i>Upload & Process Data</button></div>
-                                    <div class="mb-3"><button class="btn btn-success" onclick="submitHistoricalRecords()"><i class="bi bi-database-check me-2"></i>Submit Historical Records as Training Data</button></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="card mb-4">
-                                <div class="card-header"><i class="bi bi-plus-circle me-2"></i>Add Individual Record</div>
-                                <div class="card-body">
-                                    <div class="mb-3"><label for="exp-support" class="form-label">Support:</label><select id="exp-support" class="form-control" required><option value="">Select Support</option></select></div>
-                                    <div class="mb-3"><label for="exp-amine1" class="form-label">Amine 1 / Additive 1:</label><select id="exp-amine1" class="form-control" required><option value="">Select Amine/Additive</option></select></div>
-                                    <div class="mb-3"><label for="exp-amine2" class="form-label">Amine 2 / Additive 2:</label><select id="exp-amine2" class="form-control"><option value="No">No</option></select></div>
-                                    <div class="mb-3"><label for="exp-additive3" class="form-label">Amine 3 / Additive 3:</label><select id="exp-additive3" class="form-control"><option value="No">No</option></select></div>
-                                    <div class="mb-3"><label for="exp-mw" class="form-label">MW Mn (g/mol):</label><input type="number" id="exp-mw" class="form-control" min="0" max="20000" step="100" required></div>
-                                    <div class="mb-3"><label for="exp-oc" class="form-label">Organic Content (%):</label><input type="number" id="exp-oc" class="form-control" min="0" max="100" step="0.1" required></div>
-                                    <div class="mb-3"><label for="exp-capacity" class="form-label">CO₂ Capacity (mmol/g):</label><input type="number" id="exp-capacity" class="form-control" min="0" max="10" step="0.01" required></div>
-                                    <div class="mb-3"><button class="btn btn-success" onclick="addIndividualRecord()"><i class="bi bi-plus me-2"></i>Add Record</button></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Uploaded Records Preview -->
-                    <div class="card mt-4">
-                        <div class="card-header"><i class="bi bi-table me-2"></i>Uploaded Records Preview</div>
-                        <div class="card-body">
-                            <div class="table-responsive historical-table">
-                                <table class="table table-striped">
-                                    <thead><tr><th>Support</th><th>Amine 1</th><th>Amine 2</th><th>Amine 3</th><th>MW (g/mol)</th><th>Org. Content (%)</th><th>CO₂ Capacity (mmol/g)</th><th>Actions</th></tr></thead>
-                                    <tbody id="historicalRecordsTable"><tr><td colspan="8" class="text-center text-muted">No records uploaded yet</td></tr></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="d-flex justify-content-between mt-4">
-                        <button class="btn btn-outline-secondary" onclick="goToStep(2)"><i class="bi bi-arrow-left me-2"></i>Back to Step 2</button>
-                        <button class="btn btn-primary" onclick="initializeSystem()">Initialize Optimization System <i class="bi bi-check-circle ms-2"></i></button>
-                    </div>
+        <!-- Right Column: Recent Experiments & Actions -->
+        <div class="col-md-3">
+            <div class="card mb-3">
+                <div class="card-header"><i class="fas fa-history me-2"></i>Recent Experiments</div>
+                <div class="card-body" id="recentExperimentsList" style="max-height: 250px; overflow-y: auto;">
+                    No experiments yet
                 </div>
             </div>
-        </div>
-
-        <!-- Step 4: Optimization Interface -->
-        <div class="step-content" id="step4Content">
-            <div class="row">
-                <!-- Left Column (col-md-4): Status, Best Experiment, Input Form -->
-                <div class="col-md-4">
-                    <!-- Optimization Status -->
-                    <div class="card mb-3">
-                        <div class="card-header"><i class="bi bi-speedometer2 me-2"></i>Optimization Status</div>
-                        <div class="card-body">
-                            <div class="row text-center">
-                                <div class="col-6 mb-3"><div class="metric-value display-6 text-primary" id="modelAccuracy">0.0000</div><div class="metric-label">Best Capacity (mmol/g)</div></div>
-                                <div class="col-6 mb-3"><div class="metric-value display-6 text-success" id="iterationCount">0</div><div class="metric-label">Experiments</div></div>
-                            </div>
-                            <div class="row text-center">
-                                <div class="col-6 mb-3"><div class="metric-value display-6 text-info" id="realExperiments">0</div><div class="metric-label">Real Experiments</div></div>
-                                <div class="col-6 mb-3"><div class="metric-value display-6 text-warning" id="dataPoints">0</div><div class="metric-label">Data Points</div></div>
-                            </div>
-                            <div class="mt-4">
-                                <button class="btn btn-primary w-100 mb-2" onclick="generateCandidates()"><i class="bi bi-magic me-2"></i>Generate Top Candidate</button>
-                                <button class="btn btn-success w-100 mb-2" onclick="recordExperiment()"><i class="bi bi-plus-circle me-2"></i>Input Experimental Results</button>
-                                <a href="/experimental-form" class="btn btn-outline-primary w-100 mb-2"><i class="bi bi-file-earmark-plus me-2"></i>Submit Multiple Results</a>
-                                <div class="alert alert-info"><small><i class="bi bi-info-circle"></i><strong>Important:</strong> Input your experimental results here after testing candidates to improve the model and get better recommendations.</small></div>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- Best Experiment Record Card -->
-                    <div class="card mb-3 best-experiment-card" id="bestExperimentCard" style="display: none;">
-                        <div class="card-header"><i class="bi bi-trophy me-2"></i>Best Experiment Record</div>
-                        <div class="card-body" id="bestExperimentContent">
-                            <div class="text-center text-muted p-3">No experiments yet</div>
-                        </div>
-                    </div>
-                    <!-- Input Custom Experimental Data -->
-                    <div class="card mt-4">
-                        <div class="card-header"><i class="bi bi-database-add me-2"></i>Input Custom Experimental Data</div>
-                        <div class="card-body">
-                            <p class="mb-3 small">Input experimental results for catalyst formulations that match your current search bounds and conditions.</p>
-                            <div id="bulk-input-form">
-                                <div class="row">
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-support-opt">Support:</label>
-                                        <select id="exp-support-opt" class="form-control" required>
-                                            <option value="">Select Support</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-amine1-opt">Amine 1 / Additive 1:</label>
-                                        <select id="exp-amine1-opt" class="form-control" required>
-                                            <option value="">Select Amine/Additive</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-amine2-opt">Amine 2 / Additive 2:</label>
-                                        <select id="exp-amine2-opt" class="form-control" required>
-                                            <option value="No">No</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-additive3-opt">Amine 3 / Additive 3:</label>
-                                        <select id="exp-additive3-opt" class="form-control" required>
-                                            <option value="No">No</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-mw-opt">MW Mn (g/mol):</label>
-                                        <input type="number" id="exp-mw-opt" class="form-control" step="100" required>
-                                    </div>
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-oc-opt">Organic Content (%):</label>
-                                        <input type="number" id="exp-oc-opt" class="form-control" step="0.1" required>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-capacity-opt">CO₂ Capacity (mmol/g):</label>
-                                        <input type="number" id="exp-capacity-opt" class="form-control" min="0" max="10" step="0.01" required>
-                                    </div>
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-notes-opt">Notes:</label>
-                                        <input type="text" id="exp-notes-opt" class="form-control" placeholder="Additional notes">
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-temp-opt">Temperature (°C):</label>
-                                        <input type="number" id="exp-temp-opt" class="form-control" value="25.0" min="-50" max="200" step="0.1" required>
-                                    </div>
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-humidity-opt">Humidity (%):</label>
-                                        <input type="number" id="exp-humidity-opt" class="form-control" value="0.0" min="0" max="100" step="0.1" required>
-                                    </div>
-                                </div>
-                                <div class="row">
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-co2-conc-opt">CO₂ Concentration (%):</label>
-                                        <input type="number" id="exp-co2-conc-opt" class="form-control" value="0.04" min="0" max="100" step="0.01" required>
-                                    </div>
-                                    <div class="form-group col-md-6">
-                                        <label for="exp-flow-rate-opt">Flow Rate (mL/min):</label>
-                                        <input type="number" id="exp-flow-rate-opt" class="form-control" value="100.0" min="0" max="1000" step="0.1" required>
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="exp-test-method-opt">Test Method:</label>
-                                    <select id="exp-test-method-opt" class="form-control" required>
-                                        <option value="TGA" selected>TGA</option>
-                                        <option value="BET">BET</option>
-                                        <option value="Chemisorption">Chemisorption</option>
-                                        <option value="Breakthrough">Breakthrough</option>
-                                    </select>
-                                </div>
-                                <div class="mt-3">
-                                    <button class="btn btn-success" onclick="submitCustomExperimentalData()"><i class="bi bi-save me-2"></i>Submit Experimental Data</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <!-- Middle Column (col-md-5): Optimization Progress + Top 5 Candidates -->
-                <div class="col-md-5">
-                    <div class="card mb-3">
-                        <div class="card-header"><i class="bi bi-graph-up me-2"></i>Optimization Progress</div>
-                        <div class="card-body text-center">
-                            <img id="optimizationChartImg" src="" alt="Optimization Chart" style="width: 100%; max-height: 300px; object-fit: contain;" onerror="this.src=''; this.alt='Chart not available';">
-                            <div class="text-center mt-2"><small class="text-muted">Capacity over iteration (experiments). Historical data shown at x=0.</small></div>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <div><i class="bi bi-bar-chart me-2"></i>Top 5 Candidates Details</div>
-                            <div><span class="badge bg-info" id="candidateCount">0 Candidates</span></div>
-                        </div>
-                        <div class="card-body" id="candidatesContainer">
-                            <div class="text-center text-muted p-4"><i class="bi bi-graph-up display-6"></i><p class="mt-3">Generate candidates to see details</p></div>
-                        </div>
-                    </div>
-                </div>
-                <!-- Right Column (col-md-3): Recent Experiments, Model Info, Actions -->
-                <div class="col-md-3">
-                    <div class="card mb-3">
-                        <div class="card-header"><i class="bi bi-list-check me-2"></i>Recent Experiments</div>
-                        <div class="card-body experiment-history" id="predictionAccuracy">
-                            <div class="text-center text-muted p-4">No experiments yet</div>
-                        </div>
-                    </div>
-                    <div class="card mb-3">
-                        <div class="card-header"><i class="bi bi-cpu me-2"></i>Model Information</div>
-                        <div class="card-body">
-                            <small>
-                                <div class="mb-2"><strong>GP Model:</strong> SingleTaskGP</div>
-                                <div class="mb-2"><strong>Kernel:</strong> Matern 5/2</div>
-                                <div class="mb-2"><strong>Acquisition:</strong> Expected Improvement</div>
-                                <div class="mb-2"><strong>Training Points:</strong> <span id="trainingPoints">0</span></div>
-                                <div class="mb-2"><strong>Model Fit:</strong> <span id="modelFit">Not fitted</span></div>
-                            </small>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header"><i class="bi bi-gear me-2"></i>Actions</div>
-                        <div class="card-body">
-                            <button class="btn btn-outline-secondary w-100 mb-2" onclick="exportData()"><i class="bi bi-download me-2"></i>Export Data</button>
-                            <button class="btn btn-outline-secondary w-100" onclick="restartSetup()"><i class="bi bi-arrow-clockwise me-2"></i>Restart Setup</button>
-                        </div>
-                    </div>
+            <div class="card">
+                <div class="card-header"><i class="fas fa-cog me-2"></i>Actions</div>
+                <div class="card-body">
+                    <button class="btn btn-outline-secondary w-100 mb-2" onclick="exportData()">
+                        <i class="fas fa-download me-2"></i>Export Data
+                    </button>
+                    <button class="btn btn-outline-danger w-100" onclick="restartSetup()">
+                        <i class="fas fa-redo-alt me-2"></i>Restart Setup
+                    </button>
                 </div>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Modal for Recording Experiment -->
-    <div class="modal fade" id="recordExperimentModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">Record Experimental Result</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body" id="recordExperimentContent"></div>
+<!-- Modal for Recording Experiment -->
+<div class="modal fade" id="recordExperimentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Record Experimental Result</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
+            <div class="modal-body" id="recordExperimentContent"></div>
         </div>
     </div>
+</div>
+{% endblock %}
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+{% block scripts %}
+<script>
+// ------------------------------------------------------------
+// GLOBAL CONFIGURATION & STATE
+// ------------------------------------------------------------
+const DEFAULT_CONFIG = {
+    supports: [
+        'SBA-15', 'NS', 'MCM-41', 'MCM-48', 'Mesoporous γ-Al2O3', 'MMSN',
+        'MCF', 'MMON', 'MPS', 'BHMS', 'SA', 'FAU', 'MIL-101(Cr)', 'MCM-36',
+        'THMS', 'MF', 'NPREXAD4', 'NPRED4020', 'PREXAD7', 'PREHP2MG',
+        'PREDA201', 'NPREHP20', 'R-CFA-SBA-15', 'W-CFA-SBA-15', 'ZN', 'AC',
+        'FS', 'CNS', 'CA', 'PREHPD450', 'MPC'
+    ],
+    amine1: [
+        'BPEI', 'TEPA', 'DEA', 'DETA', 'LPEI', 'Ph-3-ED', 'Ph-3-PD',
+        'Ph-6-ED', 'Ph-6-PD', 'PEG200', 'TETA', 'TPTA', 'EI-Den', 'PI-Den',
+        'AM-TEPA', 'PAA', 'GPAA', 'CTMA+', 'PPG', 'LPPI', 'PGA', 'PZ',
+        'MEA', 'EDA', 'Spermine', 'Spermidine', 'TREN', 'EP', 'EB-TEPA',
+        'PEHA', 'AN-TEPA'
+    ],
+    amine2: [
+        'No', 'DEA', 'CTAB', 'P123', 'PC', 'PEG200', 'SDS', 'Span80',
+        'PEG1000', 'CTAC', 'DPPD', 'TBD', 'DBPD', 'BHT', 'PET', 'TDE',
+        'HEDS', 'DTDP', 'BTES', 'APTES', 'TEOT', 'CTMA+'
+    ],
+    additive3: ['No', 'CTAC']
+};
 
-    <script>
-        // ==================== GLOBAL CONFIGURATION & STATE ====================
-        const DEFAULT_CONFIG = {
-            supports: [
-                'SBA-15', 'NS', 'MCM-41', 'MCM-48', 'Mesoporous γ-Al2O3', 'MMSN',
-                'MCF', 'MMON', 'MPS', 'BHMS', 'SA', 'FAU', 'MIL-101(Cr)', 'MCM-36',
-                'THMS', 'MF', 'NPREXAD4', 'NPRED4020', 'PREXAD7', 'PREHP2MG',
-                'PREDA201', 'NPREHP20', 'R-CFA-SBA-15', 'W-CFA-SBA-15', 'ZN', 'AC',
-                'FS', 'CNS', 'CA', 'PREHPD450', 'MPC'
-            ],
-            amine1: [
-                'BPEI', 'TEPA', 'DEA', 'DETA', 'LPEI', 'Ph-3-ED', 'Ph-3-PD',
-                'Ph-6-ED', 'Ph-6-PD', 'PEG200', 'TETA', 'TPTA', 'EI-Den', 'PI-Den',
-                'AM-TEPA', 'PAA', 'GPAA', 'CTMA+', 'PPG', 'LPPI', 'PGA', 'PZ',
-                'MEA', 'EDA', 'Spermine', 'Spermidine', 'TREN', 'EP', 'EB-TEPA',
-                'PEHA', 'AN-TEPA'
-            ],
-            amine2: [
-                'No', 'DEA', 'CTAB', 'P123', 'PC', 'PEG200', 'SDS', 'Span80',
-                'PEG1000', 'CTAC', 'DPPD', 'TBD', 'DBPD', 'BHT', 'PET', 'TDE',
-                'HEDS', 'DTDP', 'BTES', 'APTES', 'TEOT', 'CTMA+'
-            ],
-            additive3: ['No', 'CTAC']
-        };
+let currentStep = 1;
+let searchBounds = {
+    supports: [...DEFAULT_CONFIG.supports],
+    amine1: [...DEFAULT_CONFIG.amine1],
+    amine2: [...DEFAULT_CONFIG.amine2],
+    additive3: [...DEFAULT_CONFIG.additive3],
+    mwRange: [0, 10000],
+    ocRange: [0, 100]
+};
+let conditions = {
+    co2Concentration: 0.04,
+    temperature: 25.0,
+    humidity: 0,
+    flowRate: 100.0,
+    testMethod: 'TGA'
+};
+let historicalRecords = [];
+let currentCandidates = [];
+let selectedCondition = null;
 
-        // Global state
-        let currentState = {
-            step: 1,
-            searchBounds: {
-                supports: [...DEFAULT_CONFIG.supports],
-                amine1: [...DEFAULT_CONFIG.amine1],
-                amine2: [...DEFAULT_CONFIG.amine2],
-                additive3: [...DEFAULT_CONFIG.additive3],
-                mwRange: [0, 10000],
-                ocRange: [0, 100]
-            },
-            conditions: {
-                co2Concentration: 0.04,
-                temperature: 25.0,
-                humidity: 0,
-                flowRate: 100.0,
-                testMethod: 'TGA'
-            },
-            optimization: {
-                iteration: 0,
-                bestCapacity: 0.0,
-                bestExperiment: null,
-                realExperiments: 0,
-                totalDataPoints: 0,
-                currentCandidates: [],
-                experimentHistory: []
-            },
-            historicalRecords: []
-        };
+// ------------------------------------------------------------
+// UI Utilities
+// ------------------------------------------------------------
+function showLoading() {
+    document.getElementById('loadingOverlay').style.display = 'flex';
+}
+function hideLoading() {
+    document.getElementById('loadingOverlay').style.display = 'none';
+}
+function showNotification(msg, type = 'info') {
+    const el = document.getElementById('notification');
+    el.className = `notification ${type}`;
+    el.innerText = msg;
+    el.style.display = 'block';
+    setTimeout(() => {
+        el.style.display = 'none';
+    }, 3000);
+}
 
-        const originalGoToStep = goToStep;
+// ------------------------------------------------------------
+// STEP NAVIGATION
+// ------------------------------------------------------------
+function goToStep(step) {
+    currentStep = step;
+    // Update step circles
+    document.querySelectorAll('.step').forEach((el, idx) => {
+        const stepNum = idx + 1;
+        el.classList.remove('active', 'completed');
+        if (stepNum < step) el.classList.add('completed');
+        else if (stepNum === step) el.classList.add('active');
+    });
+    // Show correct content
+    document.querySelectorAll('.step-content').forEach((el, idx) => {
+        if (idx + 1 === step) el.classList.add('active');
+        else el.classList.remove('active');
+    });
+    // Trigger per-step updates
+    if (step === 1) updateStep1Summary();
+    if (step === 2) updateStep2Summary();
+    if (step === 3) { populateHistoricalForm(); updateHistoricalRecordsTable(); }
+    if (step === 4) { loadSystemStatus(); updateOptimizationChart(); }
+}
 
-        // ==================== STEP NAVIGATION ====================
-        function goToStep(stepNumber) {
-            // Update step indicators
-            document.querySelectorAll('.step').forEach((step, index) => {
-                const stepIndex = index + 1;
-                if (stepIndex < stepNumber) {
-                    step.classList.add('completed');
-                    step.classList.remove('active');
-                } else if (stepIndex === stepNumber) {
-                    step.classList.add('active');
-                    step.classList.remove('completed');
-                } else {
-                    step.classList.remove('active', 'completed');
-                }
+// ------------------------------------------------------------
+// STEP 1: SEARCH BOUNDS
+// ------------------------------------------------------------
+function initMultiSelect() {
+    // Supports
+    const supportsContainer = document.getElementById('supportsContainer');
+    supportsContainer.innerHTML = '';
+    DEFAULT_CONFIG.supports.forEach(s => {
+        const div = document.createElement('div');
+        div.className = `multi-select-item ${searchBounds.supports.includes(s) ? 'selected' : ''}`;
+        div.textContent = s;
+        div.onclick = () => toggleSelection('supports', s, div);
+        supportsContainer.appendChild(div);
+    });
+
+    // Amine 1
+    const amine1Container = document.getElementById('amine1Container');
+    amine1Container.innerHTML = '';
+    DEFAULT_CONFIG.amine1.forEach(a => {
+        const div = document.createElement('div');
+        div.className = `multi-select-item ${searchBounds.amine1.includes(a) ? 'selected' : ''}`;
+        div.textContent = a;
+        div.onclick = () => toggleSelection('amine1', a, div);
+        amine1Container.appendChild(div);
+    });
+
+    // Amine 2
+    const amine2Container = document.getElementById('amine2Container');
+    amine2Container.innerHTML = '';
+    DEFAULT_CONFIG.amine2.forEach(a => {
+        const div = document.createElement('div');
+        div.className = `multi-select-item ${searchBounds.amine2.includes(a) ? 'selected' : ''}`;
+        div.textContent = a;
+        div.onclick = () => toggleSelection('amine2', a, div);
+        amine2Container.appendChild(div);
+    });
+
+    // Additive 3 (badges)
+    const additive3Container = document.getElementById('additive3Container');
+    additive3Container.innerHTML = '';
+    DEFAULT_CONFIG.additive3.forEach(a => {
+        const span = document.createElement('span');
+        span.className = `config-badge ${searchBounds.additive3.includes(a) ? 'selected' : ''}`;
+        span.innerHTML = `${a}<i class="fas fa-check-circle ms-1 badge-check"></i>`;
+        span.onclick = () => toggleBadge('additive3', a, span);
+        additive3Container.appendChild(span);
+    });
+
+    // MW Sliders
+    document.getElementById('mwMinSlider').value = searchBounds.mwRange[0];
+    document.getElementById('mwMaxSlider').value = searchBounds.mwRange[1];
+    document.getElementById('mwMinValue').innerText = searchBounds.mwRange[0];
+    document.getElementById('mwMaxValue').innerText = searchBounds.mwRange[1];
+    // OC Sliders
+    document.getElementById('ocMinSlider').value = searchBounds.ocRange[0];
+    document.getElementById('ocMaxSlider').value = searchBounds.ocRange[1];
+    document.getElementById('ocMinValue').innerText = searchBounds.ocRange[0];
+    document.getElementById('ocMaxValue').innerText = searchBounds.ocRange[1];
+}
+function toggleSelection(type, value, el) {
+    let arr = searchBounds[type];
+    if (arr.includes(value)) {
+        arr = arr.filter(v => v !== value);
+        el.classList.remove('selected');
+    } else {
+        arr.push(value);
+        el.classList.add('selected');
+    }
+    searchBounds[type] = arr;
+    updateStep1Summary();
+}
+function toggleBadge(type, value, el) {
+    toggleSelection(type, value, el);
+}
+function selectAll(type) {
+    searchBounds[type] = [...DEFAULT_CONFIG[type]];
+    initMultiSelect();
+}
+function deselectAll(type) {
+    searchBounds[type] = [];
+    initMultiSelect();
+}
+function updateStep1Summary() {
+    document.getElementById('summarySupports').innerText = searchBounds.supports.length + ' selected';
+    document.getElementById('summaryAmine1').innerText = searchBounds.amine1.length + ' selected';
+    document.getElementById('summaryAmine2').innerText = searchBounds.amine2.length + ' selected';
+    document.getElementById('summaryAdditive3').innerText = searchBounds.additive3.length + ' selected';
+    document.getElementById('summaryMWRange').innerText = searchBounds.mwRange[0] + ' - ' + searchBounds.mwRange[1] + ' g/mol';
+    document.getElementById('summaryOCRange').innerText = searchBounds.ocRange[0] + ' - ' + searchBounds.ocRange[1] + ' %';
+}
+
+// ------------------------------------------------------------
+// STEP 2: CONDITIONS
+// ------------------------------------------------------------
+function selectCondition(cond) {
+    ['co2','temperature','humidity','flowRate'].forEach(c => {
+        document.getElementById(c+'Controls').style.display = 'none';
+        document.getElementById(c+'Card').classList.remove('selected');
+    });
+    if (selectedCondition === cond) {
+        selectedCondition = null;
+        return;
+    }
+    selectedCondition = cond;
+    document.getElementById(cond+'Card').classList.add('selected');
+    document.getElementById(cond+'Controls').style.display = 'block';
+}
+function updateCo2Value(v) {
+    let val = parseFloat(v);
+    document.getElementById('co2Value').innerText = val.toFixed(2);
+    conditions.co2Concentration = val;
+    updateStep2Summary();
+}
+function updateTemperatureValue(v) {
+    let val = parseFloat(v);
+    document.getElementById('temperatureValue').innerText = val.toFixed(1);
+    conditions.temperature = val;
+    updateStep2Summary();
+}
+function updateHumidityValue(v) {
+    let val = parseInt(v);
+    document.getElementById('humidityValue').innerText = val;
+    conditions.humidity = val;
+    updateStep2Summary();
+}
+function updateFlowRateValue(v) {
+    let val = parseFloat(v);
+    document.getElementById('flowRateValue').innerText = val.toFixed(1);
+    conditions.flowRate = val;
+    updateStep2Summary();
+}
+function updateStep2Summary() {
+    document.getElementById('finalCo2').innerText = conditions.co2Concentration.toFixed(2) + ' vol%';
+    document.getElementById('finalTemperature').innerText = conditions.temperature.toFixed(1) + ' °C';
+    document.getElementById('finalHumidity').innerText = conditions.humidity + ' %';
+    document.getElementById('finalFlowRate').innerText = conditions.flowRate.toFixed(1) + ' mL/min';
+    let method = document.querySelector('input[name="testMethod"]:checked');
+    if (method) {
+        conditions.testMethod = method.value;
+        document.getElementById('finalTestMethod').innerText = method.value;
+    }
+}
+
+// ------------------------------------------------------------
+// STEP 3: HISTORICAL RECORDS
+// ------------------------------------------------------------
+function populateHistoricalForm() {
+    let suppOpts = searchBounds.supports.length ? searchBounds.supports : DEFAULT_CONFIG.supports;
+    let a1Opts = searchBounds.amine1.length ? searchBounds.amine1 : DEFAULT_CONFIG.amine1;
+    let a2Opts = searchBounds.amine2.length ? searchBounds.amine2 : DEFAULT_CONFIG.amine2;
+    let a3Opts = searchBounds.additive3.length ? searchBounds.additive3 : DEFAULT_CONFIG.additive3;
+
+    let sel = document.getElementById('exp-support');
+    sel.innerHTML = '<option value="">Support</option>';
+    suppOpts.forEach(s => sel.innerHTML += `<option value="${s}">${s}</option>`);
+    sel = document.getElementById('exp-amine1');
+    sel.innerHTML = '<option value="">Amine 1</option>';
+    a1Opts.forEach(a => sel.innerHTML += `<option value="${a}">${a}</option>`);
+    sel = document.getElementById('exp-amine2');
+    sel.innerHTML = '<option value="No">No</option>';
+    a2Opts.forEach(a => { if (a !== 'No') sel.innerHTML += `<option value="${a}">${a}</option>`; });
+    sel = document.getElementById('exp-additive3');
+    sel.innerHTML = '<option value="No">No</option>';
+    a3Opts.forEach(a => { if (a !== 'No') sel.innerHTML += `<option value="${a}">${a}</option>`; });
+}
+
+async function uploadHistoricalData() {
+    const fileInput = document.getElementById('historicalFile');
+    const file = fileInput.files[0];
+    if (!file) {
+        showNotification('Please select a CSV file', 'warning');
+        return;
+    }
+
+    showLoading();
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const content = e.target.result;
+        // Simple CSV parsing (assumes header row)
+        const lines = content.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        const records = [];
+
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+            const record = {};
+            headers.forEach((h, idx) => {
+                record[h] = values[idx];
             });
-
-            // Update content visibility
-            document.querySelectorAll('.step-content').forEach((content, index) => {
-                const contentIndex = index + 1;
-                if (contentIndex === stepNumber) {
-                    content.classList.add('active');
-                } else {
-                    content.classList.remove('active');
-                }
-            });
-
-            currentState.step = stepNumber;
-
-            if (stepNumber === 1) {
-                updateStep1Summary();
-            } else if (stepNumber === 2) {
-                updateStep2Summary();
-            } else if (stepNumber === 3) {
-                updateStep3Summary();
-                populateHistoricalForm();
-            } else if (stepNumber === 4) {
-                updateStep4Summary();
-                loadSystemStatus().then(() => {
-                    populateExperimentalFormWithBounds();
-                    updateOptimizationChart();
-                });
-            }
-        }
-
-        // ==================== STEP 1: SEARCH BOUNDS ====================
-        function initializeMultiSelect() {
-            console.log("Initializing multi-select components...");
-            ['supportsContainer', 'amine1Container', 'amine2Container', 'additive3Container'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.innerHTML = '';
-            });
-
-            const supportsContainer = document.getElementById('supportsContainer');
-            DEFAULT_CONFIG.supports.forEach(support => {
-                const isSelected = currentState.searchBounds.supports.includes(support);
-                const item = document.createElement('div');
-                item.className = `multi-select-item ${isSelected ? 'selected' : ''}`;
-                item.textContent = support;
-                item.onclick = () => toggleSelection('supports', support, item);
-                supportsContainer.appendChild(item);
-            });
-
-            const amine1Container = document.getElementById('amine1Container');
-            DEFAULT_CONFIG.amine1.forEach(amine => {
-                const isSelected = currentState.searchBounds.amine1.includes(amine);
-                const item = document.createElement('div');
-                item.className = `multi-select-item ${isSelected ? 'selected' : ''}`;
-                item.textContent = amine;
-                item.onclick = () => toggleSelection('amine1', amine, item);
-                amine1Container.appendChild(item);
-            });
-
-            const amine2Container = document.getElementById('amine2Container');
-            DEFAULT_CONFIG.amine2.forEach(amine => {
-                const isSelected = currentState.searchBounds.amine2.includes(amine);
-                const item = document.createElement('div');
-                item.className = `multi-select-item ${isSelected ? 'selected' : ''}`;
-                item.textContent = amine;
-                item.onclick = () => toggleSelection('amine2', amine, item);
-                amine2Container.appendChild(item);
-            });
-
-            const additive3Container = document.getElementById('additive3Container');
-            DEFAULT_CONFIG.additive3.forEach(additive => {
-                const isSelected = currentState.searchBounds.additive3.includes(additive);
-                const badge = document.createElement('span');
-                badge.className = `config-badge ${isSelected ? 'selected' : ''}`;
-                badge.innerHTML = `${additive}<i class="bi bi-check-circle-fill badge-check"></i>`;
-                badge.onclick = () => toggleBadgeSelection('additive3', additive, badge);
-                additive3Container.appendChild(badge);
-            });
-
-            updateRangeSliders();
-            updateStep1Summary();
-        }
-
-        function toggleSelection(type, value, element) {
-            const array = currentState.searchBounds[type];
-            const idx = array.indexOf(value);
-            if (idx === -1) {
-                array.push(value);
-                element.classList.add('selected');
-            } else {
-                array.splice(idx, 1);
-                element.classList.remove('selected');
-            }
-            updateStep1Summary();
-        }
-
-        function toggleBadgeSelection(type, value, element) {
-            const array = currentState.searchBounds[type];
-            const idx = array.indexOf(value);
-            if (idx === -1) {
-                array.push(value);
-                element.classList.add('selected');
-            } else {
-                array.splice(idx, 1);
-                element.classList.remove('selected');
-            }
-            updateStep1Summary();
-        }
-
-        function selectAll(type) {
-            const container = document.getElementById(`${type}Container`);
-            if (!container) return;
-            container.querySelectorAll('.multi-select-item').forEach(item => {
-                item.classList.add('selected');
-                const val = item.textContent;
-                if (!currentState.searchBounds[type].includes(val))
-                    currentState.searchBounds[type].push(val);
-            });
-            updateStep1Summary();
-        }
-
-        function deselectAll(type) {
-            const container = document.getElementById(`${type}Container`);
-            if (!container) return;
-            container.querySelectorAll('.multi-select-item').forEach(item => item.classList.remove('selected'));
-            currentState.searchBounds[type] = [];
-            updateStep1Summary();
-        }
-
-        function updateRangeSliders() {
-            // MW sliders
-            const mwMinSlider = document.getElementById('mwMinSlider');
-            const mwMaxSlider = document.getElementById('mwMaxSlider');
-            const mwMinValue = document.getElementById('mwMinValue');
-            const mwMaxValue = document.getElementById('mwMaxValue');
-            if (mwMinSlider && mwMaxSlider && mwMinValue && mwMaxValue) {
-                mwMinSlider.value = currentState.searchBounds.mwRange[0];
-                mwMaxSlider.value = currentState.searchBounds.mwRange[1];
-                mwMinValue.textContent = currentState.searchBounds.mwRange[0];
-                mwMaxValue.textContent = currentState.searchBounds.mwRange[1];
-                mwMinSlider.oninput = function() {
-                    let val = parseInt(this.value);
-                    if (val > parseInt(mwMaxSlider.value)) {
-                        mwMaxSlider.value = val;
-                        currentState.searchBounds.mwRange[1] = val;
-                        mwMaxValue.textContent = val;
-                    }
-                    currentState.searchBounds.mwRange[0] = val;
-                    mwMinValue.textContent = val;
-                    updateStep1Summary();
-                };
-                mwMaxSlider.oninput = function() {
-                    let val = parseInt(this.value);
-                    if (val < parseInt(mwMinSlider.value)) {
-                        mwMinSlider.value = val;
-                        currentState.searchBounds.mwRange[0] = val;
-                        mwMinValue.textContent = val;
-                    }
-                    currentState.searchBounds.mwRange[1] = val;
-                    mwMaxValue.textContent = val;
-                    updateStep1Summary();
-                };
-            }
-            // OC sliders
-            const ocMinSlider = document.getElementById('ocMinSlider');
-            const ocMaxSlider = document.getElementById('ocMaxSlider');
-            const ocMinValue = document.getElementById('ocMinValue');
-            const ocMaxValue = document.getElementById('ocMaxValue');
-            if (ocMinSlider && ocMaxSlider && ocMinValue && ocMaxValue) {
-                ocMinSlider.value = currentState.searchBounds.ocRange[0];
-                ocMaxSlider.value = currentState.searchBounds.ocRange[1];
-                ocMinValue.textContent = currentState.searchBounds.ocRange[0];
-                ocMaxValue.textContent = currentState.searchBounds.ocRange[1];
-                ocMinSlider.oninput = function() {
-                    let val = parseInt(this.value);
-                    if (val > parseInt(ocMaxSlider.value)) {
-                        ocMaxSlider.value = val;
-                        currentState.searchBounds.ocRange[1] = val;
-                        ocMaxValue.textContent = val;
-                    }
-                    currentState.searchBounds.ocRange[0] = val;
-                    ocMinValue.textContent = val;
-                    updateStep1Summary();
-                };
-                ocMaxSlider.oninput = function() {
-                    let val = parseInt(this.value);
-                    if (val < parseInt(ocMinSlider.value)) {
-                        ocMinSlider.value = val;
-                        currentState.searchBounds.ocRange[0] = val;
-                        ocMinValue.textContent = val;
-                    }
-                    currentState.searchBounds.ocRange[1] = val;
-                    ocMaxValue.textContent = val;
-                    updateStep1Summary();
-                };
-            }
-        }
-
-        function updateStep1Summary() {
-            const s = document.getElementById('summarySupports');
-            if (s) s.textContent = `${currentState.searchBounds.supports.length} selected`;
-            const a1 = document.getElementById('summaryAmine1');
-            if (a1) a1.textContent = `${currentState.searchBounds.amine1.length} selected`;
-            const a2 = document.getElementById('summaryAmine2');
-            if (a2) a2.textContent = `${currentState.searchBounds.amine2.length} selected`;
-            const a3 = document.getElementById('summaryAdditive3');
-            if (a3) a3.textContent = `${currentState.searchBounds.additive3.length} selected`;
-            const mw = document.getElementById('summaryMWRange');
-            if (mw) mw.textContent = `${currentState.searchBounds.mwRange[0]} - ${currentState.searchBounds.mwRange[1]} g/mol`;
-            const oc = document.getElementById('summaryOCRange');
-            if (oc) oc.textContent = `${currentState.searchBounds.ocRange[0]} - ${currentState.searchBounds.ocRange[1]} %`;
-        }
-
-        // ==================== STEP 2: EXPERIMENTAL CONDITIONS ====================
-        let selectedCondition = null;
-        function selectCondition(cond) {
-            ['co2', 'temperature', 'humidity', 'flowRate'].forEach(c => {
-                const ctrl = document.getElementById(`${c}Controls`);
-                if (ctrl) ctrl.style.display = 'none';
-                const card = document.getElementById(`${c}Card`);
-                if (card) card.classList.remove('selected');
-            });
-            if (selectedCondition === cond) {
-                selectedCondition = null;
-                return;
-            }
-            selectedCondition = cond;
-            document.getElementById(`${cond}Card`).classList.add('selected');
-            document.getElementById(`${cond}Controls`).style.display = 'block';
-        }
-
-        function updateCo2Value(v) {
-            let val = parseFloat(v);
-            document.getElementById('co2Value').textContent = val.toFixed(2);
-            currentState.conditions.co2Concentration = val;
-            updateStep2Summary();
-        }
-
-        function updateTemperatureValue(v) {
-            let val = parseFloat(v);
-            document.getElementById('temperatureValue').textContent = val.toFixed(1);
-            currentState.conditions.temperature = val;
-            updateStep2Summary();
-        }
-
-        function updateHumidityValue(v) {
-            let val = parseInt(v);
-            document.getElementById('humidityValue').textContent = val;
-            currentState.conditions.humidity = val;
-            updateStep2Summary();
-        }
-
-        function updateFlowRateValue(v) {
-            let val = parseFloat(v);
-            document.getElementById('flowRateValue').textContent = val.toFixed(1);
-            currentState.conditions.flowRate = val;
-            updateStep2Summary();
-        }
-
-        function updateStep2Summary() {
-            const fco2 = document.getElementById('finalCo2');
-            if (fco2) fco2.textContent = `${currentState.conditions.co2Concentration.toFixed(2)} vol %`;
-            const ftemp = document.getElementById('finalTemperature');
-            if (ftemp) ftemp.textContent = `${currentState.conditions.temperature.toFixed(1)} °C`;
-            const fhum = document.getElementById('finalHumidity');
-            if (fhum) fhum.textContent = `${currentState.conditions.humidity} %`;
-            const fflow = document.getElementById('finalFlowRate');
-            if (fflow) fflow.textContent = `${currentState.conditions.flowRate.toFixed(1)} mL/min`;
-            const radio = document.querySelector('input[name="testMethod"]:checked');
-            if (radio) {
-                currentState.conditions.testMethod = radio.value;
-                const ftest = document.getElementById('finalTestMethod');
-                if (ftest) ftest.textContent = radio.value;
-            }
-        }
-
-        // ==================== STEP 3: HISTORICAL RECORDS ====================
-        function updateStep3Summary() {
-            updateHistoricalRecordsTable();
-        }
-
-        function populateHistoricalForm() {
-            const suppOpts = currentState.searchBounds.supports.length ? currentState.searchBounds.supports : DEFAULT_CONFIG.supports;
-            const a1Opts = currentState.searchBounds.amine1.length ? currentState.searchBounds.amine1 : DEFAULT_CONFIG.amine1;
-            const a2Opts = currentState.searchBounds.amine2.length ? currentState.searchBounds.amine2 : DEFAULT_CONFIG.amine2;
-            const a3Opts = currentState.searchBounds.additive3.length ? currentState.searchBounds.additive3 : DEFAULT_CONFIG.additive3;
-
-            const selSupp = document.getElementById('exp-support');
-            if (selSupp) {
-                selSupp.innerHTML = '<option value="">Select Support</option>';
-                suppOpts.forEach(s => selSupp.appendChild(new Option(s, s)));
-            }
-            const selA1 = document.getElementById('exp-amine1');
-            if (selA1) {
-                selA1.innerHTML = '<option value="">Select Amine/Additive</option>';
-                a1Opts.forEach(a => selA1.appendChild(new Option(a, a)));
-            }
-            const selA2 = document.getElementById('exp-amine2');
-            if (selA2) {
-                selA2.innerHTML = '<option value="No">No</option>';
-                a2Opts.forEach(a => { if (a !== "No") selA2.appendChild(new Option(a, a)); });
-            }
-            const selA3 = document.getElementById('exp-additive3');
-            if (selA3) {
-                selA3.innerHTML = '<option value="No">No</option>';
-                a3Opts.forEach(a => { if (a !== "No") selA3.appendChild(new Option(a, a)); });
-            }
-        }
-
-        async function uploadHistoricalData() {
-            const fileInput = document.getElementById('historicalFile');
-            if (!fileInput.files[0]) {
-                showNotification('Please select a CSV file to upload', 'warning');
-                return;
-            }
-            showLoading();
-            try {
-                const text = await fileInput.files[0].text();
-                const lines = text.split('\n');
-                const headers = lines[0].split(',').map(h => h.trim());
-                const records = [];
-                for (let i = 1; i < lines.length; i++) {
-                    if (lines[i].trim() === '') continue;
-                    const values = lines[i].split(',');
-                    const record = {};
-                    headers.forEach((h, j) => {
-                        if (j < values.length) {
-                            const v = values[j].trim();
-                            record[h] = isNaN(v) ? v : parseFloat(v);
-                        }
-                    });
-                    records.push(record);
-                }
-                const response = await fetch('/api/input-historical-records', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ experiments: records })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    currentState.historicalRecords = [...currentState.historicalRecords, ...records];
-                    updateHistoricalRecordsTable();
-                    showNotification(`${result.added_count} historical records processed`, 'success');
-                } else {
-                    showNotification(`Failed: ${result.error}`, 'danger');
-                }
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'danger');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        async function submitHistoricalRecords() {
-            if (currentState.historicalRecords.length === 0) {
-                showNotification('No historical records to submit', 'warning');
-                return;
-            }
-            const badge = document.getElementById('systemStatusBadge');
-            if (badge && badge.textContent === 'Ready') {
-                await submitHistoricalRecordsToLiveSystem();
-            } else {
-                showNotification(`Historical records (${currentState.historicalRecords.length}) ready. Click "Initialize Optimization System".`, 'info');
-            }
-        }
-
-        async function submitHistoricalRecordsToLiveSystem() {
-            showLoading();
-            try {
-                const response = await fetch('/api/input-historical-records', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ experiments: currentState.historicalRecords })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    showNotification(`${result.added_count} historical records added`, 'success');
-                    currentState.optimization.totalDataPoints = result.total_data_points || 0;
-                    currentState.optimization.bestCapacity = result.best_capacity || 0;
-                    currentState.optimization.iteration = result.total_experiments || 0;
-                    updateOptimizationStatusUI();
-                } else {
-                    showNotification(`Failed: ${result.error}`, 'danger');
-                }
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'danger');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        function addIndividualRecord() {
-            const support = document.getElementById('exp-support').value;
-            const amine1 = document.getElementById('exp-amine1').value;
-            const amine2 = document.getElementById('exp-amine2').value;
-            const additive3 = document.getElementById('exp-additive3').value;
-            const mw = parseFloat(document.getElementById('exp-mw').value);
-            const oc = parseFloat(document.getElementById('exp-oc').value);
-            const capacity = parseFloat(document.getElementById('exp-capacity').value);
-            if (!support || !amine1 || isNaN(mw) || isNaN(oc) || isNaN(capacity)) {
-                showNotification('Please fill all required fields', 'warning');
-                return;
-            }
-            const record = {
-                Support: support,
-                Amine_1_or_Additive_1: amine1,
-                Amine_2_or_Additive_2: amine2,
-                Amine_3_or_Additive_3: additive3,
-                MW_Mn_g_mol: mw,
-                Organic_Content_pct: oc,
-                CO2_Capacity_mmol_g: capacity
+            // Map expected columns
+            const mapped = {
+                Support: record['Support'] || '',
+                Amine_1_or_Additive_1: record['Amine_1_or_Additive_1'] || record['Amine1'] || '',
+                Amine_2_or_Additive_2: record['Amine_2_or_Additive_2'] || record['Amine2'] || 'No',
+                Amine_3_or_Additive_3: record['Amine_3_or_Additive_3'] || record['Additive3'] || 'No',
+                MW_Mn_g_mol: parseFloat(record['MW_Mn_g_mol'] || record['MW'] || 0),
+                Organic_Content_pct: parseFloat(record['Organic_Content_pct'] || record['OC'] || 0),
+                CO2_Capacity_mmol_g: parseFloat(record['CO2_Capacity_mmol_g'] || record['Capacity'] || 0)
             };
-            currentState.historicalRecords.push(record);
-            updateHistoricalRecordsTable();
-            document.getElementById('exp-support').value = '';
-            document.getElementById('exp-amine1').value = '';
-            document.getElementById('exp-amine2').value = 'No';
-            document.getElementById('exp-additive3').value = 'No';
-            document.getElementById('exp-mw').value = '';
-            document.getElementById('exp-oc').value = '';
-            document.getElementById('exp-capacity').value = '';
-            showNotification('Record added', 'success');
-        }
-
-        function updateHistoricalRecordsTable() {
-            const tbody = document.getElementById('historicalRecordsTable');
-            if (!tbody) return;
-            if (currentState.historicalRecords.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No records uploaded yet</td></tr>';
-                return;
-            }
-            let html = '';
-            currentState.historicalRecords.forEach((rec, idx) => {
-                html += `<tr>
-                    <td>${rec.Support}</td>
-                    <td>${rec.Amine_1_or_Additive_1}</td>
-                    <td>${rec.Amine_2_or_Additive_2}</td>
-                    <td>${rec.Amine_3_or_Additive_3}</td>
-                    <td>${rec.MW_Mn_g_mol}</td>
-                    <td>${rec.Organic_Content_pct}%</td>
-                    <td>${rec.CO2_Capacity_mmol_g.toFixed(4)}</td>
-                    <td><button class="btn btn-sm btn-danger" onclick="removeHistoricalRecord(${idx})"><i class="bi bi-trash"></i></button></td>
-                </tr>`;
-            });
-            tbody.innerHTML = html;
-        }
-
-        function removeHistoricalRecord(index) {
-            currentState.historicalRecords.splice(index, 1);
-            updateHistoricalRecordsTable();
-            showNotification('Record removed', 'info');
-        }
-
-        // ==================== SYSTEM INITIALIZATION ====================
-        async function initializeSystem() {
-            if (currentState.searchBounds.supports.length === 0) {
-                showNotification('Select at least one support material', 'warning');
-                return;
-            }
-            if (currentState.searchBounds.amine1.length === 0) {
-                showNotification('Select at least one Amine 1', 'warning');
-                return;
-            }
-            if (currentState.searchBounds.amine2.length === 0) {
-                showNotification('Select at least one Amine 2', 'warning');
-                return;
-            }
-            if (currentState.searchBounds.additive3.length === 0) {
-                showNotification('Select at least one Additive 3', 'warning');
-                return;
-            }
-            showLoading();
-            try {
-                const initData = {
-                    searchBounds: currentState.searchBounds,
-                    conditions: currentState.conditions,
-                    historicalRecords: currentState.historicalRecords
-                };
-                const response = await fetch('/api/init', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(initData)
-                });
-                const result = await response.json();
-                if (result.success) {
-                    document.getElementById('systemStatusBadge').textContent = 'Ready';
-                    document.getElementById('systemStatusBadge').className = 'badge bg-success';
-                    currentState.optimization.bestCapacity = result.best_capacity || 0;
-                    currentState.optimization.totalDataPoints = result.data_points || 0;
-                    currentState.optimization.iteration = result.iteration || 0;
-                    updateOptimizationStatusUI();
-                    goToStep(4);
-                    showNotification('System initialized successfully!', 'success');
-                } else {
-                    showNotification(`Failed: ${result.error}`, 'danger');
-                }
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'danger');
-            } finally {
-                hideLoading();
+            if (mapped.Support && mapped.Amine_1_or_Additive_1 && !isNaN(mapped.MW_Mn_g_mol) && !isNaN(mapped.Organic_Content_pct) && !isNaN(mapped.CO2_Capacity_mmol_g)) {
+                records.push(mapped);
             }
         }
 
-        // ==================== STEP 4: OPTIMIZATION ====================
-        function updateStep4Summary() {
-            updateOptimizationStatusUI();
-        }
+        // Add to historicalRecords
+        historicalRecords = historicalRecords.concat(records);
+        updateHistoricalRecordsTable();
+        fileInput.value = '';
+        showNotification(`Added ${records.length} records from CSV`, 'success');
+        hideLoading();
+    };
+    reader.readAsText(file);
+}
 
-        function updateOptimizationStatusUI() {
-            const bestCap = document.getElementById('modelAccuracy');
-            if (bestCap) bestCap.textContent = currentState.optimization.bestCapacity.toFixed(4);
-            const iter = document.getElementById('iterationCount');
-            if (iter) iter.textContent = currentState.optimization.iteration;
-            const realExp = document.getElementById('realExperiments');
-            if (realExp) realExp.textContent = currentState.optimization.realExperiments;
-            const dataPts = document.getElementById('dataPoints');
-            if (dataPts) dataPts.textContent = currentState.optimization.totalDataPoints;
-            const trainPts = document.getElementById('trainingPoints');
-            if (trainPts) trainPts.textContent = currentState.optimization.totalDataPoints;
-            const modelFit = document.getElementById('modelFit');
-            if (modelFit) modelFit.textContent = currentState.optimization.totalDataPoints > 0 ? 'Fitted' : 'Not fitted';
-        }
+function addIndividualRecord() {
+    let support = document.getElementById('exp-support').value;
+    let amine1 = document.getElementById('exp-amine1').value;
+    let amine2 = document.getElementById('exp-amine2').value;
+    let additive3 = document.getElementById('exp-additive3').value;
+    let mw = parseFloat(document.getElementById('exp-mw').value);
+    let oc = parseFloat(document.getElementById('exp-oc').value);
+    let cap = parseFloat(document.getElementById('exp-capacity').value);
+    if (!support || !amine1 || isNaN(mw) || isNaN(oc) || isNaN(cap)) {
+        showNotification('Please fill all required fields with valid numbers.', 'warning');
+        return;
+    }
+    let rec = {
+        Support: support,
+        Amine_1_or_Additive_1: amine1,
+        Amine_2_or_Additive_2: amine2,
+        Amine_3_or_Additive_3: additive3,
+        MW_Mn_g_mol: mw,
+        Organic_Content_pct: oc,
+        CO2_Capacity_mmol_g: cap
+    };
+    historicalRecords.push(rec);
+    updateHistoricalRecordsTable();
+    // Clear form
+    document.getElementById('exp-support').value = '';
+    document.getElementById('exp-amine1').value = '';
+    document.getElementById('exp-amine2').value = 'No';
+    document.getElementById('exp-additive3').value = 'No';
+    document.getElementById('exp-mw').value = '';
+    document.getElementById('exp-oc').value = '';
+    document.getElementById('exp-capacity').value = '';
+}
 
-        function updateBestExperimentUI() {
-            const card = document.getElementById('bestExperimentCard');
-            const content = document.getElementById('bestExperimentContent');
-            if (!card || !content) return;
-            const best = currentState.optimization.bestExperiment;
-            if (!best) {
-                card.style.display = 'none';
-                return;
-            }
-            card.style.display = 'block';
-            const cap = best.actual_capacity.toFixed(4);
-            const date = best.timestamp ? new Date(best.timestamp).toLocaleString() : '';
-            const cfg = best.candidate || {};
-            content.innerHTML = `
-                <div class="text-center">
-                    <h4 class="text-success">${cap} mmol/g</h4>
-                    <small class="text-muted">Recorded: ${date}</small>
-                    <hr class="my-2">
-                    <div class="small">
-                        <div><strong>Support:</strong> ${cfg.Support || 'N/A'}</div>
-                        <div><strong>Amine 1:</strong> ${cfg.Amine_1_or_Additive_1 || 'N/A'}</div>
-                        <div><strong>Amine 2:</strong> ${cfg.Amine_2_or_Additive_2 || 'N/A'}</div>
-                        <div><strong>Amine 3:</strong> ${cfg.Amine_3_or_Additive_3 || 'N/A'}</div>
-                        <div><strong>MW:</strong> ${cfg.MW_Mn_g_mol ? cfg.MW_Mn_g_mol.toLocaleString() : 'N/A'} g/mol</div>
-                        <div><strong>Org. Content:</strong> ${cfg.Organic_Content_pct ? cfg.Organic_Content_pct.toFixed(1) : 'N/A'}%</div>
-                    </div>
-                </div>
-            `;
-        }
+function updateHistoricalRecordsTable() {
+    const tbody = document.getElementById('historicalRecordsTable');
+    const countSpan = document.getElementById('recordCount');
+    if (historicalRecords.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No records</td></tr>';
+        countSpan.innerText = '0';
+        return;
+    }
+    let html = '';
+    historicalRecords.forEach((rec, idx) => {
+        html += `<tr>
+            <td>${rec.Support}</td>
+            <td>${rec.Amine_1_or_Additive_1}</td>
+            <td>${rec.Amine_2_or_Additive_2}</td>
+            <td>${rec.Amine_3_or_Additive_3}</td>
+            <td>${rec.MW_Mn_g_mol.toFixed(0)}</td>
+            <td>${rec.Organic_Content_pct.toFixed(1)}</td>
+            <td>${rec.CO2_Capacity_mmol_g.toFixed(3)}</td>
+            <td><button class="btn btn-sm btn-outline-danger" onclick="removeHistoricalRecord(${idx})"><i class="fas fa-trash"></i></button></td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+    countSpan.innerText = historicalRecords.length;
+}
 
-        async function loadSystemStatus() {
-            try {
-                const response = await fetch('/api/get-status');
-                const result = await response.json();
-                if (result.success) {
-                    currentState.optimization.iteration = result.iteration || 0;
-                    currentState.optimization.bestCapacity = parseFloat(result.best_capacity) || 0;
-                    currentState.optimization.realExperiments = result.total_experiments || 0;
-                    currentState.optimization.totalDataPoints = result.total_data_points || 0;
-                    currentState.optimization.bestExperiment = result.best_experiment || null;
+function removeHistoricalRecord(idx) {
+    historicalRecords.splice(idx, 1);
+    updateHistoricalRecordsTable();
+}
 
-                    if (result.search_bounds) {
-                        Object.assign(currentState.searchBounds, result.search_bounds);
-                    }
-
-                    updateOptimizationStatusUI();
-                    updateBestExperimentUI();
-
-                    const badge = document.getElementById('systemStatusBadge');
-                    if (badge && result.total_data_points > 0) {
-                        badge.textContent = 'Ready';
-                        badge.className = 'badge bg-success';
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading system status:', error);
-            }
-        }
-
-        function displayTopCandidate(candidates) {
-            const container = document.getElementById('candidatesContainer');
-            if (!container) return;
-            if (!candidates || candidates.length === 0) {
-                container.innerHTML = `<div class="text-center text-muted p-5"><i class="bi bi-award display-6"></i><p class="mt-3">No candidate generated yet.<br>Click "Generate Top Candidate".</p></div>`;
-                document.getElementById('candidateCount').textContent = '0 Candidates';
-                return;
-            }
-
-            let html = `<div class="table-responsive"><table class="table table-hover"><thead class="table-light"><tr>
-                <th>Rank</th><th>Support</th><th>Amine 1</th><th>Amine 2</th><th>Additive 3</th>
-                <th>MW (g/mol)</th><th>Org. Content (%)</th><th>Pred. Cap. (mmol/g)</th><th>Exp. Imp.</th><th>Uncertainty</th><th>Action</th>
-            </tr></thead><tbody>`;
-
-            candidates.forEach((cand, idx) => {
-                const isBest = idx === 0;
-                const predCap = cand.predictedCapacity || cand.Predicted_CO2_Capacity_mmol_g || 0;
-                const mw = cand.mw || cand.MW_Mn_g_mol || 0;
-                const oc = cand.organicContent || cand.Organic_Content_pct || 0;
-                const amine3 = cand.Amine_3_or_Additive_3 || 'Unknown';
-                const unc = cand.Uncertainty || 0;
-                const ei = cand.Expected_Improvement || 0;
-                html += `<tr ${isBest ? 'class="table-success"' : ''}>
-                    <td><strong>${idx + 1}${isBest ? ' <span class="badge bg-success">Best</span>' : ''}</strong></td>
-                    <td>${cand.Support || 'Unknown'}</td>
-                    <td>${cand.Amine_1_or_Additive_1 || 'Unknown'}</td>
-                    <td>${cand.Amine_2_or_Additive_2 || 'Unknown'}</td>
-                    <td>${amine3}</td>
-                    <td>${mw.toLocaleString()}</td>
-                    <td>${oc.toFixed(1)}%</td>
-                    <td><strong>${parseFloat(predCap).toFixed(4)}</strong></td>
-                    <td>${ei.toFixed(4)}</td>
-                    <td>${unc.toFixed(4)}</td>
-                    <td><button class="btn btn-sm btn-outline-success" onclick="openRecordExperiment(${idx})"><i class="bi bi-plus-circle"></i> Input</button></td>
-                </tr>`;
-            });
-            html += '</tbody></table></div>';
-            container.innerHTML = html;
-            document.getElementById('candidateCount').textContent = `${candidates.length} Candidates`;
-        }
-
-        async function generateCandidates() {
-            showLoading();
-            try {
-                const response = await fetch('/api/generate-candidates', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ n_candidates: 5 })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    currentState.optimization.currentCandidates = result.candidates || [];
-                    currentState.optimization.bestCapacity = parseFloat(result.best_capacity) || 0;
-                    displayTopCandidate(result.candidates);
-                    updateOptimizationStatusUI();
-                    showNotification(`Generated ${result.candidates.length} candidates`, 'info');
-                    setTimeout(updateOptimizationChart, 500);
-                } else {
-                    showNotification(`Failed: ${result.error}`, 'danger');
-                }
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'danger');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        function recordExperiment() {
-            if (!currentState.optimization.currentCandidates?.length) {
-                showNotification('Generate candidates first', 'warning');
-                return;
-            }
-            openRecordExperiment(0);
-        }
-
-        function openRecordExperiment(candidateIndex) {
-            const modal = new bootstrap.Modal(document.getElementById('recordExperimentModal'));
-            const content = document.getElementById('recordExperimentContent');
-            if (!content) return;
-            const candidate = currentState.optimization.currentCandidates[candidateIndex];
-            const predCap = candidate.predictedCapacity || candidate.Predicted_CO2_Capacity_mmol_g || 0;
-            const mw = candidate.mw || candidate.MW_Mn_g_mol || 0;
-            const oc = candidate.organicContent || candidate.Organic_Content_pct || 0;
-            const amine3 = candidate.Amine_3_or_Additive_3 || 'Unknown';
-            content.innerHTML = `
-                <div class="mb-3">
-                    <h5>Input Your Experimental Results</h5>
-                    <div class="d-flex justify-content-between align-items-center mt-2">
-                        <div class="text-end">
-                            <div class="capacity-value">${parseFloat(predCap).toFixed(4)} mmol/g</div>
-                            <small class="text-muted">Predicted value</small>
-                        </div>
-                    </div>
-                </div>
-                <div class="mb-3">
-                    <h6>Candidate Configuration</h6>
-                    <div class="row small">
-                        <div class="col-6"><strong>Support:</strong> ${candidate.Support || 'Unknown'}</div>
-                        <div class="col-6"><strong>MW:</strong> ${mw.toLocaleString()} g/mol</div>
-                        <div class="col-4"><strong>Amine 1:</strong> ${candidate.Amine_1_or_Additive_1 || 'Unknown'}</div>
-                        <div class="col-4"><strong>Amine 2:</strong> ${candidate.Amine_2_or_Additive_2 || 'Unknown'}</div>
-                        <div class="col-4"><strong>Additive 3:</strong> ${amine3}</div>
-                        <div class="col-12"><strong>Org. Content:</strong> ${oc.toFixed(1)}%</div>
-                    </div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Measured CO₂ Capacity (mmol/g)</label>
-                    <input type="number" class="form-control" id="actualCapacity" step="0.0001" min="0" value="${predCap}" placeholder="Enter your measured value">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Experimental Notes</label>
-                    <textarea class="form-control" id="experimentNotes" rows="3" placeholder="Observations..."></textarea>
-                </div>
-                <div class="alert alert-info"><small><i class="bi bi-info-circle me-1"></i>This data will update the model.</small></div>
-                <div class="text-end">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-success" onclick="submitExperiment(${candidateIndex})">Submit Results</button>
-                </div>
-            `;
-            modal.show();
-        }
-
-        async function submitExperiment(candidateIndex) {
-            const candidate = currentState.optimization.currentCandidates[candidateIndex];
-            const actualCap = parseFloat(document.getElementById('actualCapacity').value);
-            const notes = document.getElementById('experimentNotes').value;
-            if (isNaN(actualCap) || actualCap < 0) {
-                showNotification('Please enter a valid capacity', 'danger');
-                return;
-            }
-            showLoading();
-            try {
-                const response = await fetch('/api/record-experiment', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ candidate_id: candidateIndex, actual_capacity: actualCap, notes })
-                });
-                const result = await response.json();
-                if (result.success) {
-                    if (actualCap > currentState.optimization.bestCapacity) {
-                        currentState.optimization.bestCapacity = actualCap;
-                        showNotification(`New best capacity: ${actualCap.toFixed(4)} mmol/g!`, 'success');
-                    }
-                    currentState.optimization.realExperiments = result.total_experiments;
-                    currentState.optimization.iteration = result.iteration || result.total_experiments;
-                    currentState.optimization.totalDataPoints = result.total_data_points || 0;
-                    await loadSystemStatus();
-                    updateOptimizationStatusUI();
-                    updateBestExperimentUI();
-                    bootstrap.Modal.getInstance(document.getElementById('recordExperimentModal')).hide();
-                    showNotification('Experiment recorded', 'success');
-                    setTimeout(updateOptimizationChart, 500);
-                } else {
-                    showNotification(`Failed: ${result.error}`, 'danger');
-                }
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'danger');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        async function updateOptimizationChart() {
-            try {
-                const response = await fetch('/api/generate-chart');
-                const data = await response.json();
-                if (data.success && data.chart_data) {
-                    document.getElementById('optimizationChartImg').src = data.chart_data;
-                }
-            } catch (error) {
-                console.error('Error fetching chart:', error);
-            }
-        }
-
-        // ==================== CUSTOM EXPERIMENTAL DATA FORM (BOUNDS‑AWARE) ====================
-        function populateExperimentalFormWithBounds() {
-            console.log("Populating experimental form with current search bounds");
-            const suppOpts = currentState.searchBounds.supports.length ? currentState.searchBounds.supports : DEFAULT_CONFIG.supports;
-            const a1Opts = currentState.searchBounds.amine1.length ? currentState.searchBounds.amine1 : DEFAULT_CONFIG.amine1;
-            const a2Opts = currentState.searchBounds.amine2.length ? currentState.searchBounds.amine2 : DEFAULT_CONFIG.amine2;
-            const a3Opts = currentState.searchBounds.additive3.length ? currentState.searchBounds.additive3 : DEFAULT_CONFIG.additive3;
-
-            const suppSelect = document.getElementById('exp-support-opt');
-            if (suppSelect) {
-                suppSelect.innerHTML = '<option value="">Select Support</option>';
-                suppOpts.forEach(s => suppSelect.appendChild(new Option(s, s)));
-            }
-
-            const a1Select = document.getElementById('exp-amine1-opt');
-            if (a1Select) {
-                a1Select.innerHTML = '<option value="">Select Amine/Additive</option>';
-                a1Opts.forEach(a => a1Select.appendChild(new Option(a, a)));
-            }
-
-            const a2Select = document.getElementById('exp-amine2-opt');
-            if (a2Select) {
-                a2Select.innerHTML = '<option value="No">No</option>';
-                a2Opts.forEach(a => { if (a !== "No") a2Select.appendChild(new Option(a, a)); });
-            }
-
-            const a3Select = document.getElementById('exp-additive3-opt');
-            if (a3Select) {
-                a3Select.innerHTML = '<option value="No">No</option>';
-                a3Opts.forEach(a => { if (a !== "No") a3Select.appendChild(new Option(a, a)); });
-            }
-
-            const mwInput = document.getElementById('exp-mw-opt');
-            if (mwInput) {
-                const [min, max] = currentState.searchBounds.mwRange || [0, 10000];
-                mwInput.min = min;
-                mwInput.max = max;
-                mwInput.placeholder = `${min} - ${max}`;
-                if (mwInput.value && (parseFloat(mwInput.value) < min || parseFloat(mwInput.value) > max)) {
-                    mwInput.value = min;
-                }
-            }
-
-            const ocInput = document.getElementById('exp-oc-opt');
-            if (ocInput) {
-                const [min, max] = currentState.searchBounds.ocRange || [0, 100];
-                ocInput.min = min;
-                ocInput.max = max;
-                ocInput.placeholder = `${min} - ${max}`;
-                if (ocInput.value && (parseFloat(ocInput.value) < min || parseFloat(ocInput.value) > max)) {
-                    ocInput.value = min;
-                }
-            }
-
-            const tempInput = document.getElementById('exp-temp-opt');
-            if (tempInput) tempInput.value = currentState.conditions.temperature || 25.0;
-            const humInput = document.getElementById('exp-humidity-opt');
-            if (humInput) humInput.value = currentState.conditions.humidity || 0.0;
-            const co2Input = document.getElementById('exp-co2-conc-opt');
-            if (co2Input) co2Input.value = currentState.conditions.co2Concentration || 0.04;
-            const flowInput = document.getElementById('exp-flow-rate-opt');
-            if (flowInput) flowInput.value = currentState.conditions.flowRate || 100.0;
-            const testSelect = document.getElementById('exp-test-method-opt');
-            if (testSelect) testSelect.value = currentState.conditions.testMethod || 'TGA';
-        }
-
-        // Alias for backward compatibility
-        const populateExperimentalForm = populateExperimentalFormWithBounds;
-
-        async function submitCustomExperimentalData() {
-            const support = document.getElementById('exp-support-opt').value;
-            const amine1 = document.getElementById('exp-amine1-opt').value;
-            const amine2 = document.getElementById('exp-amine2-opt').value;
-            const additive3 = document.getElementById('exp-additive3-opt').value;
-            const mwStr = document.getElementById('exp-mw-opt').value;
-            const ocStr = document.getElementById('exp-oc-opt').value;
-            const capacityStr = document.getElementById('exp-capacity-opt').value;
-            const notes = document.getElementById('exp-notes-opt').value;
-            const tempStr = document.getElementById('exp-temp-opt').value;
-            const humidityStr = document.getElementById('exp-humidity-opt').value;
-            const co2Str = document.getElementById('exp-co2-conc-opt').value;
-            const flowStr = document.getElementById('exp-flow-rate-opt').value;
-            const testMethod = document.getElementById('exp-test-method-opt').value;
-
-            if (!support || !amine1 || !mwStr || !ocStr || !capacityStr) {
-                showNotification('Please fill all required fields', 'danger');
-                return;
-            }
-            const mw = parseFloat(mwStr);
-            const oc = parseFloat(ocStr);
-            const capacity = parseFloat(capacityStr);
-            const temp = parseFloat(tempStr);
-            const humidity = parseFloat(humidityStr);
-            const co2Conc = parseFloat(co2Str);
-            const flowRate = parseFloat(flowStr);
-            if (isNaN(mw) || isNaN(oc) || isNaN(capacity)) {
-                showNotification('Invalid numeric values', 'danger');
-                return;
-            }
-
-            const data = {
-                experiments: [{
-                    Support: support,
-                    Amine_1_or_Additive_1: amine1,
-                    Amine_2_or_Additive_2: amine2,
-                    Amine_3_or_Additive_3: additive3,
-                    MW_Mn_g_mol: mw,
-                    Organic_Content_pct: oc,
-                    CO2_Capacity_mmol_g: capacity,
-                    Temperature: temp,
-                    Humidity: humidity,
-                    CO2_Concentration: co2Conc,
-                    Flow_Rate: flowRate,
-                    Test_Method: testMethod,
-                    Notes: notes
-                }]
-            };
-
-            showLoading();
-            try {
-                const response = await fetch('/api/input-custom-experimental-results', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                const result = await response.json();
-                if (result.success) {
-                    showNotification(`Data submitted: ${result.message}`, 'success');
-                    currentState.optimization.totalDataPoints = result.total_data_points || 0;
-                    currentState.optimization.iteration = result.iteration || 0;
-                    currentState.optimization.realExperiments = result.total_experiments || 0;
-                    if (capacity > currentState.optimization.bestCapacity) {
-                        currentState.optimization.bestCapacity = capacity;
-                    }
-                    updateOptimizationStatusUI();
-                    await loadSystemStatus();
-                    document.getElementById('exp-support-opt').value = '';
-                    document.getElementById('exp-amine1-opt').value = '';
-                    document.getElementById('exp-amine2-opt').value = 'No';
-                    document.getElementById('exp-additive3-opt').value = 'No';
-                    document.getElementById('exp-mw-opt').value = '';
-                    document.getElementById('exp-oc-opt').value = '';
-                    document.getElementById('exp-capacity-opt').value = '';
-                    document.getElementById('exp-notes-opt').value = '';
-                    setTimeout(updateOptimizationChart, 500);
-                } else {
-                    showNotification(`Failed: ${result.error}`, 'danger');
-                }
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'danger');
-            } finally {
-                hideLoading();
-            }
-        }
-
-        // ==================== UTILITIES ====================
-        function showNotification(message, type = 'success') {
-            const notif = document.getElementById('notification');
-            const msg = document.getElementById('notificationMessage');
-            if (notif && msg) {
-                msg.textContent = message;
-                notif.style.display = 'block';
-                setTimeout(() => { notif.style.display = 'none'; }, 5000);
-            }
-        }
-
-        function hideNotification() {
-            const notif = document.getElementById('notification');
-            if (notif) notif.style.display = 'none';
-        }
-
-        function showLoading() {
-            const overlay = document.getElementById('loadingOverlay');
-            if (overlay) overlay.style.display = 'flex';
-        }
-
-        function hideLoading() {
-            const overlay = document.getElementById('loadingOverlay');
-            if (overlay) overlay.style.display = 'none';
-        }
-
-        async function exportData() {
-            try {
-                const response = await fetch('/api/export-data');
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `dac_optimization_${new Date().toISOString().split('T')[0]}.json`;
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    showNotification('Data exported', 'info');
-                } else {
-                    showNotification('Export failed', 'danger');
-                }
-            } catch (error) {
-                showNotification(`Error: ${error.message}`, 'danger');
-            }
-        }
-
-        function restartSetup() {
-            if (confirm('Are you sure you want to restart? All progress will be lost.')) {
-                currentState.optimization = {
-                    iteration: 0,
-                    bestCapacity: 0.0,
-                    bestExperiment: null,
-                    realExperiments: 0,
-                    totalDataPoints: 0,
-                    currentCandidates: [],
-                    experimentHistory: []
-                };
-                currentState.historicalRecords = [];
-                document.getElementById('candidatesContainer').innerHTML = `<div class="text-center text-muted p-4"><i class="bi bi-graph-up display-6"></i><p class="mt-3">Generate candidates to see details</p></div>`;
-                document.getElementById('bestExperimentCard').style.display = 'none';
-                document.getElementById('predictionAccuracy').innerHTML = '<div class="text-center text-muted p-4">No experiments yet</div>';
-                document.getElementById('optimizationChartImg').src = '';
-                goToStep(1);
-                showNotification('System reset.', 'info');
-            }
-        }
-
-        // ==================== EVENT LISTENERS AND INIT ====================
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeMultiSelect();
-            updateStep1Summary();
-            document.querySelectorAll('input[name="testMethod"]').forEach(r => r.addEventListener('change', updateStep2Summary));
-            showNotification('DAC Material Optimizer ready. Complete Steps 1-3 to begin.', 'info');
+async function initializeSystem() {
+    if (historicalRecords.length === 0 && !confirm('No historical records. Continue anyway?')) {
+        return;
+    }
+    showLoading();
+    try {
+        const payload = {
+            searchBounds: searchBounds,
+            conditions: conditions,
+            historicalRecords: historicalRecords
+        };
+        const resp = await fetch('/api/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
-
-        goToStep = function(stepNum) {
-            originalGoToStep(stepNum);
-            if (stepNum === 3) setTimeout(populateHistoricalForm, 100);
-            if (stepNum === 4) {
-                setTimeout(() => {
-                    loadSystemStatus().then(populateExperimentalFormWithBounds);
-                }, 100);
-            }
-        };
-
-        if (currentState.step === 4) {
-            setTimeout(() => {
-                loadSystemStatus().then(populateExperimentalFormWithBounds);
-            }, 200);
+        const data = await resp.json();
+        if (data.success) {
+            showNotification('System initialized successfully', 'success');
+            goToStep(4);
+        } else {
+            showNotification(data.error || 'Initialization failed', 'error');
         }
-    </script>
-</body>
-</html>
+    } catch (e) {
+        showNotification(e.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function submitHistoricalRecords() {
+    initializeSystem(); // Alias
+}
+
+// ------------------------------------------------------------
+// STEP 4: OPTIMIZATION
+// ------------------------------------------------------------
+async function loadSystemStatus() {
+    try {
+        const resp = await fetch('/api/get-status');
+        if (!resp.ok) {
+            // No active session – maybe stay in step 3
+            return;
+        }
+        const data = await resp.json();
+        if (data.success) {
+            document.getElementById('modelAccuracy').innerText = data.best_capacity.toFixed(4);
+            document.getElementById('iterationCount').innerText = data.iteration;
+            document.getElementById('realExperiments').innerText = data.total_experiments;
+            document.getElementById('dataPoints').innerText = data.total_data_points;
+
+            if (data.best_experiment) {
+                let best = data.best_experiment;
+                let cap = data.best_capacity;
+                document.getElementById('bestExperimentCard').style.display = 'block';
+                document.getElementById('bestExperimentContent').innerHTML = `
+                    <div class="text-center">
+                        <h4 class="text-success">${cap.toFixed(4)} mmol/g</h4>
+                        <hr>
+                        <div><strong>Support:</strong> ${best.Support || 'N/A'}</div>
+                        <div><strong>Amine 1:</strong> ${best.Amine_1_or_Additive_1 || 'N/A'}</div>
+                        <div><strong>MW:</strong> ${best.MW_Mn_g_mol ? best.MW_Mn_g_mol.toFixed(0) : 'N/A'} g/mol</div>
+                        <div><strong>Org:</strong> ${best.Organic_Content_pct ? best.Organic_Content_pct.toFixed(1) : 'N/A'}%</div>
+                    </div>
+                `;
+            } else {
+                document.getElementById('bestExperimentCard').style.display = 'none';
+            }
+
+            // Load recent experiments
+            await loadRecentExperiments(data.session_id);
+            // Load current candidates if any
+            const sessionResp = await fetch(`/db/session/${data.session_id}`);
+            const sessionData = await sessionResp.json();
+            if (sessionData.success && sessionData.session.current_candidates) {
+                currentCandidates = sessionData.session.current_candidates;
+                displayCandidates(currentCandidates);
+            }
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function loadRecentExperiments(sessionId) {
+    try {
+        const resp = await fetch(`/db/experiments?session_id=${sessionId}`);
+        const data = await resp.json();
+        if (data.success) {
+            const recent = data.experiments.slice(-5).reverse();
+            const list = document.getElementById('recentExperimentsList');
+            if (recent.length === 0) {
+                list.innerHTML = 'No experiments yet';
+                return;
+            }
+            let html = '<div class="list-group">';
+            recent.forEach(exp => {
+                const cand = exp.candidate || {};
+                html += `
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between">
+                            <small>${cand.Support || ''}</small>
+                            <span class="badge bg-success">${exp.experimental_performance.toFixed(3)}</span>
+                        </div>
+                        <small class="text-muted">${new Date(exp.timestamp).toLocaleString()}</small>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            list.innerHTML = html;
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function updateOptimizationChart() {
+    try {
+        const resp = await fetch('/api/generate-chart');
+        const data = await resp.json();
+        if (data.success && data.chart_data) {
+            document.getElementById('optimizationChartImg').src = data.chart_data;
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function generateCandidates() {
+    showLoading();
+    try {
+        const resp = await fetch('/api/generate-candidates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ n_candidates: 5 })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            currentCandidates = data.candidates;
+            displayCandidates(data.candidates);
+            showNotification(`Generated ${data.candidates.length} candidates`, 'success');
+        } else {
+            showNotification(data.error, 'error');
+        }
+    } catch (e) {
+        showNotification(e.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function displayCandidates(candidates) {
+    let container = document.getElementById('candidatesContainer');
+    if (!candidates || candidates.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted p-4">No candidates</div>';
+        document.getElementById('candidateCount').innerText = '0';
+        return;
+    }
+    let html = '<div class="list-group">';
+    candidates.forEach((c, idx) => {
+        html += `
+            <div class="list-group-item candidate-card">
+                <div class="d-flex w-100 justify-content-between">
+                    <h6 class="mb-1">#${idx+1} – ${c.Predicted_CO2_Capacity_mmol_g.toFixed(4)} mmol/g</h6>
+                    <small class="text-info">EI: ${c.Expected_Improvement.toFixed(4)}</small>
+                </div>
+                <p class="mb-1 small">
+                    Support: ${c.Support} · Amine1: ${c.Amine_1_or_Additive_1} ·
+                    MW: ${c.MW_Mn_g_mol.toFixed(0)} · Org: ${c.Organic_Content_pct.toFixed(1)}%
+                </p>
+                <button class="btn btn-sm btn-outline-success" onclick="openRecordModal(${idx})">
+                    <i class="fas fa-flask me-1"></i>Record
+                </button>
+            </div>
+        `;
+    });
+    html += '</div>';
+    container.innerHTML = html;
+    document.getElementById('candidateCount').innerText = candidates.length;
+}
+
+function openRecordModal(idx) {
+    let cand = currentCandidates[idx];
+    let modal = new bootstrap.Modal(document.getElementById('recordExperimentModal'));
+    let content = document.getElementById('recordExperimentContent');
+    content.innerHTML = `
+        <p><strong>Candidate #${idx+1}</strong></p>
+        <p>
+            Support: ${cand.Support}<br>
+            Amine 1: ${cand.Amine_1_or_Additive_1}<br>
+            MW: ${cand.MW_Mn_g_mol.toFixed(0)} g/mol<br>
+            Org: ${cand.Organic_Content_pct.toFixed(1)}%
+        </p>
+        <p>Predicted: <strong>${cand.Predicted_CO2_Capacity_mmol_g.toFixed(4)} mmol/g</strong></p>
+        <label>Measured Capacity (mmol/g):</label>
+        <input type="number" id="actualCapacity" class="form-control" step="0.001" value="${cand.Predicted_CO2_Capacity_mmol_g.toFixed(3)}">
+        <div class="mt-3">
+            <button class="btn btn-success" onclick="submitExperiment(${idx})">Submit</button>
+            <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+    `;
+    modal.show();
+}
+
+async function submitExperiment(idx) {
+    let cand = currentCandidates[idx];
+    let actual = parseFloat(document.getElementById('actualCapacity').value);
+    if (isNaN(actual)) {
+        showNotification('Please enter a valid number', 'warning');
+        return;
+    }
+    showLoading();
+    try {
+        const resp = await fetch('/api/record-experiment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                candidate_id: idx,
+                actual_capacity: actual,
+                notes: ''
+            })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showNotification(`Recorded: ${actual.toFixed(4)} mmol/g`, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('recordExperimentModal')).hide();
+            await loadSystemStatus();
+            await updateOptimizationChart();
+            // Remove recorded candidate from list? Optional: refresh candidates
+        } else {
+            showNotification(data.error, 'error');
+        }
+    } catch (e) {
+        showNotification(e.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function recordExperiment() {
+    if (!currentCandidates.length) {
+        showNotification('Generate candidates first', 'warning');
+        return;
+    }
+    openRecordModal(0);
+}
+
+async function exportData() {
+    window.open('/db/export/json', '_blank');
+}
+
+async function restartSetup() {
+    if (confirm('Restart the 4‑step process? This will reset the current session.')) {
+        showLoading();
+        try {
+            await fetch('/api/reset-system', { method: 'POST' });
+            showNotification('Session reset', 'info');
+            // Clear historical records and go to step 1
+            historicalRecords = [];
+            currentCandidates = [];
+            goToStep(1);
+        } catch (e) {
+            showNotification(e.message, 'error');
+        } finally {
+            hideLoading();
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// INITIALIZATION
+// ------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', function() {
+    initMultiSelect();
+    goToStep(1);
+
+    // Set up slider listeners for Step 1
+    document.getElementById('mwMinSlider').addEventListener('input', function() {
+        let val = parseInt(this.value);
+        let max = parseInt(document.getElementById('mwMaxSlider').value);
+        if (val > max) { document.getElementById('mwMaxSlider').value = val; max = val; }
+        searchBounds.mwRange = [val, max];
+        document.getElementById('mwMinValue').innerText = val;
+        document.getElementById('mwMaxValue').innerText = max;
+        updateStep1Summary();
+    });
+    document.getElementById('mwMaxSlider').addEventListener('input', function() {
+        let val = parseInt(this.value);
+        let min = parseInt(document.getElementById('mwMinSlider').value);
+        if (val < min) { document.getElementById('mwMinSlider').value = val; min = val; }
+        searchBounds.mwRange = [min, val];
+        document.getElementById('mwMinValue').innerText = min;
+        document.getElementById('mwMaxValue').innerText = val;
+        updateStep1Summary();
+    });
+    document.getElementById('ocMinSlider').addEventListener('input', function() {
+        let val = parseInt(this.value);
+        let max = parseInt(document.getElementById('ocMaxSlider').value);
+        if (val > max) { document.getElementById('ocMaxSlider').value = val; max = val; }
+        searchBounds.ocRange = [val, max];
+        document.getElementById('ocMinValue').innerText = val;
+        document.getElementById('ocMaxValue').innerText = max;
+        updateStep1Summary();
+    });
+    document.getElementById('ocMaxSlider').addEventListener('input', function() {
+        let val = parseInt(this.value);
+        let min = parseInt(document.getElementById('ocMinSlider').value);
+        if (val < min) { document.getElementById('ocMinSlider').value = val; min = val; }
+        searchBounds.ocRange = [min, val];
+        document.getElementById('ocMinValue').innerText = min;
+        document.getElementById('ocMaxValue').innerText = val;
+        updateStep1Summary();
+    });
+
+    // Initialize condition radio listener
+    document.querySelectorAll('input[name="testMethod"]').forEach(r => {
+        r.addEventListener('change', updateStep2Summary);
+    });
+    updateStep2Summary();
+});
+</script>
+{% endblock %}
