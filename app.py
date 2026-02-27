@@ -3,6 +3,7 @@ import json
 import base64
 from io import BytesIO
 from datetime import datetime
+from threading import Lock
 
 import torch
 import numpy as np
@@ -48,6 +49,10 @@ FEATURE_ORDER = [
 
 # Path to the master historical experiments file
 HISTORICAL_CSV_PATH = 'data/historical_experiments.csv'
+
+# Cache for BO systems to avoid recreating them unnecessarily
+bo_system_cache = {}
+cache_lock = Lock()
 
 # ----------------------------------------------------------------------
 # Global Services
@@ -603,7 +608,7 @@ def api_record_experiment():
         })
         best_cap = actual_capacity
 
-    # Update BO system with new data point and generate new candidates
+    # Update BO system with new data point
     bo = create_bo_system(sid)
     total_data_points = bo.train_X.shape[0] if bo.train_X.ndim > 0 else 0
     real_exps = [e for e in db.get_experiments_by_session(sid) if not e.get('is_historical', False)]
@@ -688,13 +693,6 @@ def api_record_experiment_full():
         })
         best_cap = actual_capacity
 
-    # Generate new candidates with updated model
-    n_candidates = int(data.get('n_candidates', 3))
-    new_candidates = bo.generate_new_candidates(n_candidates)
-    
-    # Store new candidates for next round
-    db.update_session(sid, {'current_candidates': new_candidates})
-
     total_data_points = bo.train_X.shape[0] if bo.train_X.ndim > 0 else 0
     real_exps = [e for e in db.get_experiments_by_session(sid) if not e.get('is_historical', False)]
 
@@ -702,8 +700,7 @@ def api_record_experiment_full():
         'success': True,
         'best_capacity': best_cap,
         'total_experiments': len(real_exps),
-        'total_data_points': total_data_points,
-        'new_candidates': new_candidates
+        'total_data_points': total_data_points
     })
 
 @app.route('/api/generate-chart', methods=['GET'])
@@ -838,15 +835,21 @@ def api_get_status():
     real_count = len([e for e in experiments if not e.get('is_historical', False)])
     total_data_points = len(experiments)
 
-    bo = create_bo_system(sid)
-    best_cap = float(bo.train_Y.max().item()) if bo.train_Y.numel() > 0 else 0.0
+    # Calculate best capacity from the experiments directly, without creating BO system
+    best_cap = 0.0
+    best_experiment = session_data.get('best_experiment')
+    for exp in experiments:
+        exp_capacity = exp.get('experimental_performance', 0.0)
+        if exp_capacity > best_cap:
+            best_cap = exp_capacity
+            best_experiment = exp.get('candidate')
 
     return jsonify({
         'success': True,
         'session_id': sid,
         'iteration': real_count,
         'best_capacity': best_cap,
-        'best_experiment': session_data.get('best_experiment'),
+        'best_experiment': best_experiment,
         'total_experiments': real_count,
         'total_data_points': total_data_points,
         'conditions': session_data.get('conditions', {}),
