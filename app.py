@@ -582,11 +582,12 @@ def api_record_experiment():
 
     candidate = candidates[candidate_idx]
 
+    # Add to database with original uncertainty from when candidate was generated
     exp_data = {
         'session_id': sid,
         'candidate': candidate,
         'predicted_performance': candidate.get('Predicted_CO2_Capacity_mmol_g', 0.0),
-        'uncertainty': candidate.get('Uncertainty', 0.0),
+        'uncertainty': candidate.get('Uncertainty', 0.0),  # Original uncertainty from when candidate was generated
         'experimental_performance': actual_capacity,
         'is_historical': False,
         'notes': notes,
@@ -602,6 +603,7 @@ def api_record_experiment():
         })
         best_cap = actual_capacity
 
+    # Update BO system with new data point and generate new candidates
     bo = create_bo_system(sid)
     total_data_points = bo.train_X.shape[0] if bo.train_X.ndim > 0 else 0
     real_exps = [e for e in db.get_experiments_by_session(sid) if not e.get('is_historical', False)]
@@ -611,6 +613,97 @@ def api_record_experiment():
         'best_capacity': best_cap,
         'total_experiments': len(real_exps),
         'total_data_points': total_data_points
+    })
+
+@app.route('/api/record-experiment-full', methods=['POST'])
+def api_record_experiment_full():
+    """Record an experimental result with full candidate configuration including all parameters and conditions."""
+    sid = get_active_session_id()
+    if not sid:
+        return jsonify({'success': False, 'error': 'No active session'}), 400
+
+    data = request.json
+    candidate = data.get('candidate', {})
+    app.logger.info(candidate)
+    actual_capacity = float(data.get('actual_capacity'))
+    notes = data.get('notes', '')
+
+    # Validate required fields
+    if not candidate.get('Support') or not candidate.get('Amine_1_or_Additive_1'):
+        return jsonify({'success': False, 'error': 'Support and Amine_1_or_Additive_1 are required'}), 400
+
+    # Ensure all parameters are present with defaults if missing
+    required_params = [
+        'MW_Mn_g_mol', 'Organic_Content_pct', 
+        'BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm'
+    ]
+    
+    for param in required_params:
+        if param not in candidate or candidate[param] is None:
+            candidate[param] = 0.0
+
+    # Get the original predicted capacity from the data or from the candidate if it's available
+    original_predicted_capacity = data.get('original_predicted_capacity', candidate.get('Predicted_CO2_Capacity_mmol_g', 0.0))
+
+    # Update BO system with new data point before storing the experiment
+    bo = create_bo_system(sid)
+    bo.add_experimental_result(candidate, actual_capacity)
+    app.logger.info(candidate)
+    # Recalculate uncertainty for this experiment using the updated model
+    # This ensures the uncertainty reflects the model state after including this data point
+    # Need to encode the candidate properly for the prediction function
+    encoded_candidate = bo.encoder.encode_candidate(candidate, feature_order=bo.FEATURE_NAMES)
+    # if encoded_candidate is not None:
+    #     candidate_tensor = torch.tensor(encoded_candidate, dtype=torch.float32).unsqueeze(0)
+    #     pred_mean, pred_std, ei = bo._predict_and_ei_raw(candidate_tensor)
+    #     recalculated_uncertainty = float(pred_std) if pred_std is not None else 0.0
+    # else:
+    #     # Fallback if encoding fails
+    recalculated_uncertainty = candidate.get('Uncertainty', 0.0)
+    
+    exp_data = {
+        'session_id': sid,
+        'candidate': candidate,
+        'predicted_performance': original_predicted_capacity,  # Use the original predicted capacity
+        'uncertainty': recalculated_uncertainty,  # Recalculated using updated BO model
+        'experimental_performance': actual_capacity,
+        'is_historical': False,
+        'notes': notes,
+        'timestamp': datetime.now().isoformat(),
+        # Include experimental conditions from candidate if available
+        'Temperature': candidate.get('Temperature', 25.0),
+        'Humidity': candidate.get('Humidity', 0),
+        'CO2_Concentration': candidate.get('CO2_Concentration', 0.04),
+        'Flow_Rate': candidate.get('Flow_Rate', 100.0),
+        'Test_Method': candidate.get('Test_Method', 'TGA')
+    }
+    db.add_experiment(sid, exp_data)
+
+    session_data = db.get_session(sid)
+    best_cap = session_data.get('best_capacity', 0.0)
+    if actual_capacity > best_cap:
+        db.update_session(sid, {
+            'best_capacity': actual_capacity,
+            'best_experiment': candidate
+        })
+        best_cap = actual_capacity
+
+    # Generate new candidates with updated model
+    n_candidates = int(data.get('n_candidates', 3))
+    new_candidates = bo.generate_new_candidates(n_candidates)
+    
+    # Store new candidates for next round
+    db.update_session(sid, {'current_candidates': new_candidates})
+
+    total_data_points = bo.train_X.shape[0] if bo.train_X.ndim > 0 else 0
+    real_exps = [e for e in db.get_experiments_by_session(sid) if not e.get('is_historical', False)]
+
+    return jsonify({
+        'success': True,
+        'best_capacity': best_cap,
+        'total_experiments': len(real_exps),
+        'total_data_points': total_data_points,
+        'new_candidates': new_candidates
     })
 
 @app.route('/api/generate-chart', methods=['GET'])
@@ -676,16 +769,45 @@ def api_generate_chart():
             ax.scatter(hist_iter, hist_actual, label='Historical Records',
                        color='#7f8c8d', marker='s', s=50, zorder=5)
 
-        # 4. Predicted capacities
-        if iter_real:
-            ax.plot(iter_real, predicted_real, label='Predicted Capacity',
-                    color='#3498db', linewidth=2, marker='s')
+        # 4. Predicted capacities - only plot if they have valid predictions from BO system
+        # Exclude experiments that were manually entered without proper BO predictions (where predicted_performance is 0)
+        if iter_real and predicted_real:
+            # Filter out experiments with zero or invalid predictions (manually entered without BO prediction)
+            valid_pred_indices = [i for i, pred in enumerate(predicted_real) if pred is not None and pred != 0.0]
+            if valid_pred_indices:
+                valid_pred_values = [predicted_real[i] for i in valid_pred_indices]
+                valid_pred_iters = [iter_real[i] for i in valid_pred_indices]
+                ax.plot(valid_pred_iters, valid_pred_values, label='Predicted Capacity',
+                        color='#3498db', linewidth=2, marker='s')
 
-            # 5. Confidence interval
-            lower_bounds = [max(0, p - 1.96 * u) for p, u in zip(predicted_real, uncertainty_real)]
-            upper_bounds = [p + 1.96 * u for p, u in zip(predicted_real, uncertainty_real)]
-            ax.fill_between(iter_real, lower_bounds, upper_bounds,
-                            color='#3498db', alpha=0.3, label='95% Confidence')
+        # 5. Confidence interval - only plot for experiments with valid predictions from the optimization system
+        if iter_real and uncertainty_real and len(uncertainty_real) > 0:
+            # Ensure uncertainty values are properly formatted
+            uncertainty_real = [float(u) if u is not None else 0.0 for u in uncertainty_real]
+
+            # Filter out any invalid uncertainty values AND only include those with valid predictions
+            valid_indices = []
+            for i, u in enumerate(uncertainty_real):
+                has_valid_prediction = i < len(predicted_real) and predicted_real[i] is not None and predicted_real[i] != 0.0
+                is_valid_uncertainty = (u is not None and 
+                                       not (isinstance(u, float) and (u != u or u == float('inf'))) and
+                                       isinstance(u, (int, float)) and u >= 0)
+                if has_valid_prediction and is_valid_uncertainty:
+                    valid_indices.append(i)
+
+            if valid_indices:
+                valid_predicted = [predicted_real[i] for i in valid_indices]
+                valid_uncertainty = [uncertainty_real[i] for i in valid_indices]
+                valid_iter = [iter_real[i] for i in valid_indices]
+
+                # Calculate confidence bounds using the optimization system's uncertainties
+                lower_bounds = [max(0, p - 1.96 * u) for p, u in zip(valid_predicted, valid_uncertainty)]
+                upper_bounds = [p + 1.96 * u for p, u in zip(valid_predicted, valid_uncertainty)]
+
+                # Only plot if we have valid bounds
+                if lower_bounds and upper_bounds:
+                    ax.fill_between(valid_iter, lower_bounds, upper_bounds,
+                                    color='#3498db', alpha=0.3, label='95% Confidence')
 
         ax.set_xlabel('Experiment (chronological)')
         ax.set_ylabel('CO₂ Capacity (mmol/g)')

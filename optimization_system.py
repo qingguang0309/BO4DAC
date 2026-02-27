@@ -166,7 +166,22 @@ class CatalystBOWithHistory:
         all_configs = []
         for i in range(min(len(candidates_raw), n_candidates * 2)):
             config = self._decode_configuration(candidates_raw[i])
+
+            # Calculate prediction even for random candidates
             pred_mean, pred_std, ei = self._predict_and_ei(candidates_raw[i:i+1])
+
+            # Ensure we have valid prediction values even when there's insufficient data
+            if not self._has_enough_data():
+                # When there's not enough data, use a reasonable estimate based on existing data
+                if self.train_Y.numel() > 0:
+                    pred_mean = self.train_Y.mean().item()  # Use average of existing Y values
+                    pred_std = max(self.train_Y.std().item(), 0.1)  # Use standard deviation of existing Y values
+                    ei = 0.0  # No expected improvement without a proper model
+                else:
+                    pred_mean = 0.0  # Default value if no training data
+                    pred_std = 1.0  # Default uncertainty
+                    ei = 0.0
+
             config['Predicted_CO2_Capacity_mmol_g'] = float(pred_mean)
             config['Uncertainty'] = float(pred_std)
             config['Expected_Improvement'] = float(ei)
@@ -189,7 +204,8 @@ class CatalystBOWithHistory:
         with torch.no_grad(), gpytorch.settings.fast_pred_var():
             posterior = gp.posterior(X_norm)
             mean = posterior.mean.squeeze().item()
-            std = math.sqrt(posterior.variance.squeeze().item())
+            variance = posterior.variance.squeeze().item()
+            std = math.sqrt(max(variance, 1e-9))  # Ensure std is not too small or negative due to numerical issues
             best_f = self.train_Y.max().item()
             ei = max(0.0, mean - best_f)
         return mean, std, ei
