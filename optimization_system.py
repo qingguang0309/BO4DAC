@@ -29,7 +29,9 @@ class CatalystBOWithHistory:
         'Amine_2_or_Additive_2',
         'Amine_3_or_Additive_3',
         'MW_Mn_g_mol',
-        'Organic_Content_pct'
+        'Organic_Content_pct',
+        'BET_Bare_Surface_Area_m2_g',
+        'Average_Bare_Pore_Diameter_nm'
     ]
 
     def __init__(self,
@@ -41,6 +43,7 @@ class CatalystBOWithHistory:
         self.user_continuous_bounds = continuous_bounds or {}
 
         # Internal encoder
+        self.feature_names = self.FEATURE_NAMES
         self.encoder = FeatureEncoder()
         self.encoder.feature_names = self.FEATURE_NAMES
 
@@ -57,7 +60,7 @@ class CatalystBOWithHistory:
         # Optimisation bounds (tensor)
         self.bounds = None
         self.categorical_dims = [0, 1, 2, 3]
-        self.continuous_dims = [4, 5]
+        self.continuous_dims = [4, 5, 6, 7]
 
         # History tracking
         self.optimization_history = []
@@ -83,19 +86,25 @@ class CatalystBOWithHistory:
 
         mw_min, mw_max = self.user_continuous_bounds.get('MW_Mn_g_mol', (0, 10000))
         oc_min, oc_max = self.user_continuous_bounds.get('Organic_Content_pct', (0, 100))
+        bet_min, bet_max = self.user_continuous_bounds.get('BET_Bare_Surface_Area_m2_g', (0, 1000))
+        pore_min, pore_max = self.user_continuous_bounds.get('Average_Bare_Pore_Diameter_nm', (0, 20))
 
         if mw_max <= mw_min:
             mw_max = mw_min + 1000
         if oc_max <= oc_min:
             oc_max = oc_min + 10
+        if bet_max <= bet_min:
+            bet_max = bet_min + 100
+        if pore_max <= pore_min:
+            pore_max = pore_min + 5
 
         self.bounds = torch.tensor([
-            [0.0, 0.0, 0.0, 0.0, mw_min, oc_min],
+            [0.0, 0.0, 0.0, 0.0, mw_min, oc_min, bet_min, pore_min],
             [max(0.0, n_supports - 1.0),
              max(0.0, n_amines1 - 1.0),
              max(0.0, n_amines2 - 1.0),
              max(0.0, n_amines3 - 1.0),
-             mw_max, oc_max]
+             mw_max, oc_max, bet_max, pore_max]
         ], dtype=torch.float32)
 
     def _fit_encoder_from_bounds(self):
@@ -118,32 +127,41 @@ class CatalystBOWithHistory:
         if not self._has_enough_data():
             candidates_raw = self._generate_random_candidates(n_candidates * 2)
         else:
-            # Attempt BoTorch optimisation
-            train_X_norm = normalize(self.train_X, self.bounds)
-            train_Y = self.train_Y if self.train_Y.dim() == 2 else self.train_Y.unsqueeze(-1)
+            # Check if training data dimensions match bounds dimensions
+            if self.train_X.shape[1] != self.bounds.shape[1]:
+                # Dimension mismatch - fall back to random candidates
+                # This can happen if the training data was created with different features
+                print(f"Dimension mismatch: train_X has {self.train_X.shape[1]} features, bounds expect {self.bounds.shape[1]}")
+                candidates_raw = self._generate_random_candidates(n_candidates * 2)
+            else:
+                # Attempt BoTorch optimisation
+                train_X_norm = normalize(self.train_X, self.bounds)
+                train_Y = self.train_Y if self.train_Y.dim() == 2 else self.train_Y.unsqueeze(-1)
 
-            gp = SingleTaskGP(
-                train_X_norm,
-                train_Y,
-                outcome_transform=Standardize(m=1)
-            )
-            mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
-            fit_gpytorch_mll(mll)
+                gp = SingleTaskGP(
+                    train_X_norm,
+                    train_Y,
+                    outcome_transform=Standardize(m=1)
+                )
+                mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
+                fit_gpytorch_mll(mll)
 
-            best_f = self.train_Y.max().item()
-            qEI = qExpectedImprovement(model=gp, best_f=best_f)
+                best_f = self.train_Y.max().item()
+                qEI = qExpectedImprovement(model=gp, best_f=best_f)
 
-            norm_bounds = torch.tensor([[0.0]*6, [1.0]*6], dtype=torch.float32)
-            candidates_norm, _ = optimize_acqf(
-                acq_function=qEI,
-                bounds=norm_bounds,
-                q=n_candidates * 2,
-                num_restarts=10,
-                raw_samples=1000,
-                options={"maxiter": 100}
-            )
-            candidates_raw = unnormalize(candidates_norm, self.bounds)
-            candidates_raw = self._round_categorical(candidates_raw)
+                # Create normalized bounds based on the actual number of features
+                num_features = self.bounds.shape[1] if self.bounds is not None else 6
+                norm_bounds = torch.tensor([[0.0]*num_features, [1.0]*num_features], dtype=torch.float32)
+                candidates_norm, _ = optimize_acqf(
+                    acq_function=qEI,
+                    bounds=norm_bounds,
+                    q=n_candidates * 2,
+                    num_restarts=10,
+                    raw_samples=1000,
+                    options={"maxiter": 100}
+                )
+                candidates_raw = unnormalize(candidates_norm, self.bounds)
+                candidates_raw = self._round_categorical(candidates_raw)
 
         all_configs = []
         for i in range(min(len(candidates_raw), n_candidates * 2)):
@@ -179,7 +197,8 @@ class CatalystBOWithHistory:
     def _generate_random_candidates(self, n: int) -> torch.Tensor:
         if self.bounds is None:
             raise RuntimeError("Bounds not set; cannot generate random candidates.")
-        rand = torch.rand(n, 6, dtype=torch.float32)
+        num_features = self.bounds.shape[1]  # Get the number of features from bounds
+        rand = torch.rand(n, num_features, dtype=torch.float32)
         candidates = rand * (self.bounds[1] - self.bounds[0]) + self.bounds[0]
         return self._round_categorical(candidates)
 
@@ -209,13 +228,21 @@ class CatalystBOWithHistory:
             'Amine_2_or_Additive_2': self.unique_amines2[amine2_idx],
             'Amine_3_or_Additive_3': self.unique_amines3[amine3_idx],
             'MW_Mn_g_mol': float(X[4].item()),
-            'Organic_Content_pct': float(X[5].item())
+            'Organic_Content_pct': float(X[5].item()),
+            'BET_Bare_Surface_Area_m2_g': float(X[6].item()),
+            'Average_Bare_Pore_Diameter_nm': float(X[7].item())
         }
         config['MW_Mn_g_mol'] = max(self.bounds[0,4].item(),
                                     min(self.bounds[1,4].item(), config['MW_Mn_g_mol']))
         config['Organic_Content_pct'] = max(self.bounds[0,5].item(),
                                             min(self.bounds[1,5].item(), config['Organic_Content_pct']))
+        config['BET_Bare_Surface_Area_m2_g'] = max(self.bounds[0,6].item(),
+                                                   min(self.bounds[1,6].item(), config['BET_Bare_Surface_Area_m2_g']))
+        config['Average_Bare_Pore_Diameter_nm'] = max(self.bounds[0,7].item(),
+                                                      min(self.bounds[1,7].item(), config['Average_Bare_Pore_Diameter_nm']))
         config['Organic_Content_pct'] = round(config['Organic_Content_pct'], 1)
+        config['BET_Bare_Surface_Area_m2_g'] = round(config['BET_Bare_Surface_Area_m2_g'], 2)
+        config['Average_Bare_Pore_Diameter_nm'] = round(config['Average_Bare_Pore_Diameter_nm'], 2)
         return config
 
     def add_experimental_result(self, config: Dict, actual_capacity: float,

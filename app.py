@@ -41,7 +41,9 @@ FEATURE_ORDER = [
     'Amine_2_or_Additive_2',
     'Amine_3_or_Additive_3',
     'MW_Mn_g_mol',
-    'Organic_Content_pct'
+    'Organic_Content_pct',
+    'BET_Bare_Surface_Area_m2_g',
+    'Average_Bare_Pore_Diameter_nm'
 ]
 
 # Path to the master historical experiments file
@@ -105,9 +107,50 @@ def create_bo_system(session_id):
 
     mw_range = search_bounds.get('mwRange', [0, 10000])
     oc_range = search_bounds.get('ocRange', [0, 100])
+    
+    # Determine BET and Pore ranges based on support-specific ranges
+    support_specific_ranges = search_bounds.get('supportSpecificRanges', {})
+    supports_selected = search_bounds.get('supports', [])
+    
+    # Calculate overall ranges based on selected supports
+    if supports_selected and support_specific_ranges:
+        overall_min_bet = float('inf')
+        overall_max_bet = float('-inf')
+        overall_min_pore = float('inf')
+        overall_max_pore = float('-inf')
+        
+        for support in supports_selected:
+            if support in support_specific_ranges:
+                bet_range = support_specific_ranges[support].get('betRange', [0, 1000])
+                pore_range = support_specific_ranges[support].get('poreRange', [0, 20])
+                
+                overall_min_bet = min(overall_min_bet, bet_range[0])
+                overall_max_bet = max(overall_max_bet, bet_range[1])
+                overall_min_pore = min(overall_min_pore, pore_range[0])
+                overall_max_pore = max(overall_max_pore, pore_range[1])
+        
+        # If no specific ranges were found, use default values
+        if overall_min_bet == float('inf'):
+            overall_min_bet = 0
+        if overall_max_bet == float('-inf'):
+            overall_max_bet = 1000
+        if overall_min_pore == float('inf'):
+            overall_min_pore = 0
+        if overall_max_pore == float('-inf'):
+            overall_max_pore = 20
+            
+        bet_range = [overall_min_bet, overall_max_bet]
+        pore_range = [overall_min_pore, overall_max_pore]
+    else:
+        # Default ranges if no support-specific ranges are defined
+        bet_range = [0, 1000]
+        pore_range = [0, 20]
+    
     continuous_bounds = {
         "MW_Mn_g_mol": (float(mw_range[0]), float(mw_range[1])),
-        "Organic_Content_pct": (float(oc_range[0]), float(oc_range[1]))
+        "Organic_Content_pct": (float(oc_range[0]), float(oc_range[1])),
+        "BET_Bare_Surface_Area_m2_g": (float(bet_range[0]), float(bet_range[1])),
+        "Average_Bare_Pore_Diameter_nm": (float(pore_range[0]), float(pore_range[1]))
     }
 
     bo = CatalystBOWithHistory(
@@ -132,17 +175,36 @@ def create_bo_system(session_id):
         config = exp.get('candidate', {})
         if not config:
             continue
+        # Ensure all required features are present in the config
+        for feature in FEATURE_ORDER:
+            if feature not in config:
+                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
+                    # Default values for new parameters - use mid-range values based on current bounds
+                    if feature == 'BET_Bare_Surface_Area_m2_g':
+                        # Use the mid-point of the current BET range if available
+                        bet_range = bo.user_continuous_bounds.get('BET_Bare_Surface_Area_m2_g', (0, 1000))
+                        config[feature] = (bet_range[0] + bet_range[1]) / 2
+                    elif feature == 'Average_Bare_Pore_Diameter_nm':
+                        # Use the mid-point of the current pore range if available
+                        pore_range = bo.user_continuous_bounds.get('Average_Bare_Pore_Diameter_nm', (0, 20))
+                        config[feature] = (pore_range[0] + pore_range[1]) / 2
+                else:
+                    config[feature] = config.get(feature, 0)  # Default for other parameters
+        
         encoded = bo.encoder.encode_candidate(config, feature_order=FEATURE_ORDER)
         if encoded is not None:
-            X_list.append(encoded)
-            y_list.append(exp.get('experimental_performance', 0.0))
+            # Ensure encoded vector has the correct length
+            encoded_tensor = torch.tensor(encoded, dtype=torch.float32)
+            if encoded_tensor.numel() == len(FEATURE_ORDER):
+                X_list.append(encoded_tensor)
+                y_list.append(exp.get('experimental_performance', 0.0))
 
     if X_list:
-        bo.train_X = torch.tensor(np.array(X_list), dtype=torch.float32)
+        bo.train_X = torch.stack(X_list)  # Use torch.stack instead of np.array for consistency
         bo.train_Y = torch.tensor(np.array(y_list), dtype=torch.float32).unsqueeze(-1)
     else:
-        bo.train_X = torch.tensor([])
-        bo.train_Y = torch.tensor([])
+        bo.train_X = torch.tensor([], dtype=torch.float32).reshape(0, len(FEATURE_ORDER))  # Proper empty tensor
+        bo.train_Y = torch.tensor([], dtype=torch.float32).reshape(0, 1)
 
     return bo
 
@@ -171,6 +233,8 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
         'CO2_Capacity_mmol_g': 'CO2_Capacity_mmol_g',
         'Amine_2_or_Additive_2': 'Amine_2_or_Additive_2',
         'Amine_3_or_Additive_3': 'Amine_3_or_Additive_3',
+        'BET_Bare_Surface_Area_m2_g': 'BET_Bare_Surface_Area_m2_g',
+        'Average_Bare_Pore_Diameter_nm': 'Average_Bare_Pore_Diameter_nm',
         'Adsorption_Temperature_C': 'Temperature',
         'Relative_Humidity_pct': 'Humidity',
         'CO2_Concentration_vol_pct': 'CO2_Concentration',
@@ -191,6 +255,43 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
     allowed_amine3 = set(search_bounds.get('additive3', []))
     mw_min, mw_max = search_bounds.get('mwRange', [0, 10000])
     oc_min, oc_max = search_bounds.get('ocRange', [0, 100])
+    # Determine BET and Pore ranges based on support-specific ranges for filtering
+    support_specific_ranges = search_bounds.get('supportSpecificRanges', {})
+    supports_selected = search_bounds.get('supports', [])
+    
+    # Calculate overall ranges based on selected supports
+    if supports_selected and support_specific_ranges:
+        overall_min_bet = float('inf')
+        overall_max_bet = float('-inf')
+        overall_min_pore = float('inf')
+        overall_max_pore = float('-inf')
+        
+        for support in supports_selected:
+            if support in support_specific_ranges:
+                bet_range = support_specific_ranges[support].get('betRange', [0, 1000])
+                pore_range = support_specific_ranges[support].get('poreRange', [0, 20])
+                
+                overall_min_bet = min(overall_min_bet, bet_range[0])
+                overall_max_bet = max(overall_max_bet, bet_range[1])
+                overall_min_pore = min(overall_min_pore, pore_range[0])
+                overall_max_pore = max(overall_max_pore, pore_range[1])
+        
+        # If no specific ranges were found, use default values
+        if overall_min_bet == float('inf'):
+            overall_min_bet = 0
+        if overall_max_bet == float('-inf'):
+            overall_max_bet = 1000
+        if overall_min_pore == float('inf'):
+            overall_min_pore = 0
+        if overall_max_pore == float('-inf'):
+            overall_max_pore = 20
+            
+        bet_min, bet_max = overall_min_bet, overall_max_bet
+        pore_min, pore_max = overall_min_pore, overall_max_pore
+    else:
+        # Default ranges if no support-specific ranges are defined
+        bet_min, bet_max = [0, 1000]
+        pore_min, pore_max = [0, 20]
 
     # Current conditions
     target_temp = conditions.get('temperature', 25.0)
@@ -227,6 +328,8 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
         # --- Continuous filters ---
         mw = row.get('MW_Mn_g_mol')
         oc = row.get('Organic_Content_pct')
+        bet = row.get('BET_Bare_Surface_Area_m2_g')
+        pore = row.get('Average_Bare_Pore_Diameter_nm')
         cap = row.get('CO2_Capacity_mmol_g')
         if pd.isna(mw) or pd.isna(oc) or pd.isna(cap):
             continue
@@ -234,11 +337,17 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             mw = float(mw)
             oc = float(oc)
             cap = float(cap)
+            bet = float(bet) if not pd.isna(bet) else 0.0
+            pore = float(pore) if not pd.isna(pore) else 0.0
         except (ValueError, TypeError):
             continue
         if mw < mw_min or mw > mw_max:
             continue
         if oc < oc_min or oc > oc_max:
+            continue
+        if bet < bet_min or bet > bet_max:
+            continue
+        if pore < pore_min or pore > pore_max:
             continue
 
         # --- Condition filters ---
@@ -301,8 +410,18 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             'Amine_2_or_Additive_2': amine2,
             'Amine_3_or_Additive_3': amine3,
             'MW_Mn_g_mol': mw,
-            'Organic_Content_pct': oc
+            'Organic_Content_pct': oc,
+            'BET_Bare_Surface_Area_m2_g': bet,
+            'Average_Bare_Pore_Diameter_nm': pore
         }
+        
+        # Ensure all required features are present
+        for feature in FEATURE_ORDER:
+            if feature not in candidate:
+                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
+                    candidate[feature] = 0.0
+                else:
+                    candidate[feature] = 0.0
 
         exp_data = {
             'session_id': session_id,
@@ -367,8 +486,19 @@ def api_init():
             'Amine_2_or_Additive_2': rec.get('Amine_2_or_Additive_2', 'No'),
             'Amine_3_or_Additive_3': rec.get('Amine_3_or_Additive_3', 'No'),
             'MW_Mn_g_mol': float(rec.get('MW_Mn_g_mol', 0)),
-            'Organic_Content_pct': float(rec.get('Organic_Content_pct', 0))
+            'Organic_Content_pct': float(rec.get('Organic_Content_pct', 0)),
+            'BET_Bare_Surface_Area_m2_g': float(rec.get('BET_Bare_Surface_Area_m2_g', 0)),
+            'Average_Bare_Pore_Diameter_nm': float(rec.get('Average_Bare_Pore_Diameter_nm', 0))
         }
+        
+        # Ensure all required features are present
+        for feature in FEATURE_ORDER:
+            if feature not in candidate:
+                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
+                    candidate[feature] = 0.0
+                else:
+                    candidate[feature] = 0.0
+        
         cap = float(rec.get('CO2_Capacity_mmol_g', 0))
         exp_data = {
             'session_id': session_id,
@@ -635,8 +765,19 @@ def api_input_custom_experimental_results():
             'Amine_2_or_Additive_2': exp.get('Amine_2_or_Additive_2', 'No'),
             'Amine_3_or_Additive_3': exp.get('Amine_3_or_Additive_3', 'No'),
             'MW_Mn_g_mol': float(exp.get('MW_Mn_g_mol', 0)),
-            'Organic_Content_pct': float(exp.get('Organic_Content_pct', 0))
+            'Organic_Content_pct': float(exp.get('Organic_Content_pct', 0)),
+            'BET_Bare_Surface_Area_m2_g': float(exp.get('BET_Bare_Surface_Area_m2_g', 0)),
+            'Average_Bare_Pore_Diameter_nm': float(exp.get('Average_Bare_Pore_Diameter_nm', 0))
         }
+        
+        # Ensure all required features are present
+        for feature in FEATURE_ORDER:
+            if feature not in candidate:
+                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
+                    candidate[feature] = 0.0
+                else:
+                    candidate[feature] = 0.0
+        
         actual_cap = float(exp.get('CO2_Capacity_mmol_g', 0))
         exp_data = {
             'session_id': sid,

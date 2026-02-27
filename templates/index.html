@@ -269,6 +269,18 @@
                 <h5>Additive 3</h5>
                 <div id="additive3Container"></div>
             </div>
+            
+            <!-- Support-Specific Ranges Section -->
+            <div class="card mt-4" id="supportSpecificRangesCard" style="display: none;">
+                <div class="card-header bg-light">
+                    <i class="fas fa-layer-group me-2"></i>Support-Specific Ranges
+                </div>
+                <div class="card-body">
+                    <div id="supportRangesContainer">
+                        <div class="text-center text-muted p-4">Select support materials to configure their specific ranges</div>
+                    </div>
+                </div>
+            </div>
             <!-- Summary -->
             <div class="card mt-4">
                 <div class="card-header"><i class="fas fa-list-check me-2"></i>Search Space Summary</div>
@@ -407,6 +419,8 @@
                             <select id="exp-additive3" class="form-select mb-2"><option value="No">No</option></select>
                             <input type="number" id="exp-mw" class="form-control mb-2" placeholder="MW (g/mol)" step="0.1">
                             <input type="number" id="exp-oc" class="form-control mb-2" placeholder="Organic Content (%)" step="0.1">
+                            <input type="number" id="exp-bet" class="form-control mb-2" placeholder="BET Surface Area (m²/g)" step="0.1">
+                            <input type="number" id="exp-pore" class="form-control mb-2" placeholder="Pore Diameter (nm)" step="0.1">
                             <input type="number" id="exp-capacity" class="form-control mb-2" placeholder="CO₂ Capacity (mmol/g)" step="0.01">
                             <button class="btn btn-success w-100" onclick="addIndividualRecord()">
                                 <i class="fas fa-plus me-2"></i>Add Record
@@ -432,6 +446,8 @@
                                     <th>Add3</th>
                                     <th>MW</th>
                                     <th>OC%</th>
+                                    <th>BET</th>
+                                    <th>Pore</th>
                                     <th>Capacity</th>
                                     <th></th>
                                 </tr>
@@ -458,6 +474,76 @@
 
 <!-- ========= STEP 4: OPTIMIZATION ========= -->
 <div class="step-content" id="step4Content">
+    <!-- Configuration Frame for Step 4 -->
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <i class="fas fa-bullseye me-2"></i>Current Optimization Configuration
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <h6><i class="fas fa-sliders-h me-2 text-primary"></i>Experimental Conditions</h6>
+                    <div class="border p-3 rounded bg-light" style="max-height: 120px; overflow-y: auto;">
+                        <div class="row">
+                            <div class="col-6"><strong>Temperature:</strong> <span id="displayTemperature">25.0°C</span></div>
+                            <div class="col-6"><strong>CO₂ Conc:</strong> <span id="displayCO2">0.04 vol%</span></div>
+                        </div>
+                        <div class="row mt-1">
+                            <div class="col-6"><strong>Humidity:</strong> <span id="displayHumidity">0%</span></div>
+                            <div class="col-6"><strong>Flow Rate:</strong> <span id="displayFlowRate">100.0 mL/min</span></div>
+                        </div>
+                        <div class="row mt-1">
+                            <div class="col-12"><strong>Test Method:</strong> <span id="displayTestMethod">TGA</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <h6><i class="fas fa-bullseye me-2 text-primary"></i>Search Bounds</h6>
+                    <div class="border p-3 rounded bg-light" style="max-height: 120px; overflow-y: auto;">
+                        <div class="row">
+                            <div class="col-6"><strong>MW Range:</strong> <span id="displayMWRange">0 - 10000 g/mol</span></div>
+                            <div class="col-6"><strong>OC Range:</strong> <span id="displayOCRange">0 - 100%</span></div>
+                        </div>
+                        <div class="row mt-1">
+                            <div class="col-12"><strong>Supports:</strong> <span id="displaySupports" class="badge bg-secondary">SBA-15</span></div>
+                        </div>
+                        <div class="row mt-1">
+                            <div class="col-12"><strong>Amine 1:</strong> <span id="displayAmine1" class="badge bg-secondary">TEPA</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-12">
+                    <h6><i class="fas fa-layer-group me-2 text-primary"></i>Additional Bounds</h6>
+                    <div class="border p-3 rounded bg-light">
+                        <div class="row">
+                            <div class="col-12">
+                                <strong>Amine 2:</strong> 
+                                <div id="displayAmine2" class="d-flex flex-wrap gap-1 mt-1" style="min-height: 30px;"></div>
+                            </div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <strong>Additive 3:</strong> 
+                                <div id="displayAdditive3" class="d-flex flex-wrap gap-1 mt-1" style="min-height: 30px;"></div>
+                            </div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <strong>Support-Specific Ranges:</strong>
+                                <div id="displaySupportSpecificRanges" class="row mt-2">
+                                    <div class="col-12">
+                                        <em>No support-specific ranges defined</em>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     <div class="row">
         <!-- Left Column: Status & Best Experiment -->
         <div class="col-md-3">
@@ -730,6 +816,220 @@ function updateStep1Summary() {
     document.getElementById('summaryAdditive3').innerText = searchBounds.additive3.length + ' selected';
     document.getElementById('summaryMWRange').innerText = searchBounds.mwRange[0] + ' - ' + searchBounds.mwRange[1] + ' g/mol';
     document.getElementById('summaryOCRange').innerText = searchBounds.ocRange[0] + ' - ' + searchBounds.ocRange[1] + ' %';
+    
+    // Update support-specific ranges display
+    updateSupportSpecificRangesDisplay();
+}
+
+function updateSupportSpecificRangesDisplay() {
+    const supports = searchBounds.supports || [];
+    const container = document.getElementById('supportRangesContainer');
+    const card = document.getElementById('supportSpecificRangesCard');
+    
+    if (supports.length === 0) {
+        card.style.display = 'none';
+        return;
+    }
+    
+    card.style.display = 'block';
+    let html = '';
+    
+    supports.forEach(support => {
+        // Get current ranges for this support or set defaults
+        if (!searchBounds.supportSpecificRanges) {
+            searchBounds.supportSpecificRanges = {};
+        }
+        
+        if (!searchBounds.supportSpecificRanges[support]) {
+            // Set default ranges based on support type
+            if (support.includes('SBA') || support.toLowerCase().includes('sba')) {
+                searchBounds.supportSpecificRanges[support] = {
+                    betRange: [300, 1000],
+                    poreRange: [5, 15]
+                };
+            } else if (support.includes('MCM') || support.toLowerCase().includes('mcm')) {
+                searchBounds.supportSpecificRanges[support] = {
+                    betRange: [800, 1200],
+                    poreRange: [2, 5]
+                };
+            } else {
+                // Default ranges
+                searchBounds.supportSpecificRanges[support] = {
+                    betRange: [300, 1000],
+                    poreRange: [2, 15]
+                };
+            }
+        }
+        
+        const ranges = searchBounds.supportSpecificRanges[support];
+        const betMin = ranges.betRange[0];
+        const betMax = ranges.betRange[1];
+        const poreMin = ranges.poreRange[0];
+        const poreMax = ranges.poreRange[1];
+        
+        html += `
+            <div class="row mb-3 p-2 border rounded bg-light">
+                <div class="col-md-6">
+                    <h6>${support}</h6>
+                </div>
+                <div class="col-md-6 text-end">
+                    <button class="btn btn-sm btn-outline-danger" onclick="removeSupport('${support}')">
+                        <i class="fas fa-times"></i> Remove
+                    </button>
+                </div>
+                <div class="col-md-6 mt-2">
+                    <label class="form-label">BET Surface Area Range (m²/g)</label>
+                    <div class="d-flex align-items-center">
+                        <input type="number" class="form-control form-control-sm me-2" 
+                               value="${betMin}" 
+                               onchange="updateSupportSpecificRange('${support}', 'bet', 'min', this.value)" 
+                               style="max-width: 100px;">
+                        <span class="mx-1">-</span>
+                        <input type="number" class="form-control form-control-sm ms-2" 
+                               value="${betMax}" 
+                               onchange="updateSupportSpecificRange('${support}', 'bet', 'max', this.value)" 
+                               style="max-width: 100px;">
+                    </div>
+                </div>
+                <div class="col-md-6 mt-2">
+                    <label class="form-label">Pore Diameter Range (nm)</label>
+                    <div class="d-flex align-items-center">
+                        <input type="number" class="form-control form-control-sm me-2" 
+                               value="${poreMin}" 
+                               onchange="updateSupportSpecificRange('${support}', 'pore', 'min', this.value)" 
+                               style="max-width: 100px;" step="0.1">
+                        <span class="mx-1">-</span>
+                        <input type="number" class="form-control form-control-sm ms-2" 
+                               value="${poreMax}" 
+                               onchange="updateSupportSpecificRange('${support}', 'pore', 'max', this.value)" 
+                               style="max-width: 100px;" step="0.1">
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function updateSupportSpecificRange(support, param, minMax, value) {
+    if (!searchBounds.supportSpecificRanges) {
+        searchBounds.supportSpecificRanges = {};
+    }
+    
+    if (!searchBounds.supportSpecificRanges[support]) {
+        searchBounds.supportSpecificRanges[support] = {
+            betRange: [300, 1000],
+            poreRange: [2, 15]
+        };
+    }
+    
+    const ranges = searchBounds.supportSpecificRanges[support];
+    
+    if (param === 'bet') {
+        if (minMax === 'min') {
+            ranges.betRange[0] = parseFloat(value);
+        } else {
+            ranges.betRange[1] = parseFloat(value);
+        }
+        // Ensure min <= max
+        if (ranges.betRange[0] > ranges.betRange[1]) {
+            if (minMax === 'min') {
+                ranges.betRange[1] = ranges.betRange[0];
+                // Update the max input field
+                const maxInput = document.querySelector(`input[value="${parseFloat(value)}"]:nth-of-type(2)[onchange*="'${support}'"]`);
+                if (maxInput && maxInput.previousElementSibling && maxInput.previousElementSibling.value === value) {
+                    // Find the correct max input for this support
+                    const allInputs = document.querySelectorAll(`input[onchange*="'${support}'"]`);
+                    for (let input of allInputs) {
+                        if (input.onchange.toString().includes("updateSupportRange") && 
+                            input.onchange.toString().includes("'bet', 'max'")) {
+                            input.value = ranges.betRange[1];
+                            break;
+                        }
+                    }
+                }
+            } else {
+                ranges.betRange[0] = ranges.betRange[1];
+            }
+        }
+    } else if (param === 'pore') {
+        if (minMax === 'min') {
+            ranges.poreRange[0] = parseFloat(value);
+        } else {
+            ranges.poreRange[1] = parseFloat(value);
+        }
+        // Ensure min <= max
+        if (ranges.poreRange[0] > ranges.poreRange[1]) {
+            if (minMax === 'min') {
+                ranges.poreRange[1] = ranges.poreRange[0];
+            } else {
+                ranges.poreRange[0] = ranges.poreRange[1];
+            }
+        }
+    }
+    
+    searchBounds.supportSpecificRanges[support] = ranges;
+}
+
+function removeSupport(support) {
+    // Remove from supports list
+    searchBounds.supports = searchBounds.supports.filter(s => s !== support);
+    
+    // Remove from support-specific ranges
+    if (searchBounds.supportSpecificRanges) {
+        delete searchBounds.supportSpecificRanges[support];
+    }
+    
+    // Update UI
+    initMultiSelect(); // This will update the multi-select UI
+    updateStep1Summary();
+}
+
+function toggleSelection(type, value, el) {
+    let arr = searchBounds[type];
+    if (arr.includes(value)) {
+        arr = arr.filter(v => v !== value);
+        el.classList.remove('selected');
+        
+        // If deselecting a support, also remove its specific ranges
+        if (type === 'supports' && searchBounds.supportSpecificRanges) {
+            delete searchBounds.supportSpecificRanges[value];
+        }
+    } else {
+        arr.push(value);
+        el.classList.add('selected');
+        
+        // If selecting a support for the first time, initialize its ranges
+        if (type === 'supports') {
+            if (!searchBounds.supportSpecificRanges) {
+                searchBounds.supportSpecificRanges = {};
+            }
+            
+            if (!searchBounds.supportSpecificRanges[value]) {
+                // Set default ranges based on support type
+                if (value.includes('SBA') || value.toLowerCase().includes('sba')) {
+                    searchBounds.supportSpecificRanges[value] = {
+                        betRange: [300, 1000],
+                        poreRange: [5, 15]
+                    };
+                } else if (value.includes('MCM') || value.toLowerCase().includes('mcm')) {
+                    searchBounds.supportSpecificRanges[value] = {
+                        betRange: [800, 1200],
+                        poreRange: [2, 5]
+                    };
+                } else {
+                    // Default ranges
+                    searchBounds.supportSpecificRanges[value] = {
+                        betRange: [300, 1000],
+                        poreRange: [2, 15]
+                    };
+                }
+            }
+        }
+    }
+    searchBounds[type] = arr;
+    updateStep1Summary();
 }
 
 // ------------------------------------------------------------
@@ -863,6 +1163,8 @@ function addIndividualRecord() {
     let additive3 = document.getElementById('exp-additive3').value;
     let mw = parseFloat(document.getElementById('exp-mw').value);
     let oc = parseFloat(document.getElementById('exp-oc').value);
+    let bet = parseFloat(document.getElementById('exp-bet').value);
+    let pore = parseFloat(document.getElementById('exp-pore').value);
     let cap = parseFloat(document.getElementById('exp-capacity').value);
     if (!support || !amine1 || isNaN(mw) || isNaN(oc) || isNaN(cap)) {
         showNotification('Please fill all required fields with valid numbers.', 'warning');
@@ -875,6 +1177,8 @@ function addIndividualRecord() {
         Amine_3_or_Additive_3: additive3,
         MW_Mn_g_mol: mw,
         Organic_Content_pct: oc,
+        BET_Bare_Surface_Area_m2_g: isNaN(bet) ? 0.0 : bet,
+        Average_Bare_Pore_Diameter_nm: isNaN(pore) ? 0.0 : pore,
         CO2_Capacity_mmol_g: cap
     };
     historicalRecords.push(rec);
@@ -886,6 +1190,8 @@ function addIndividualRecord() {
     document.getElementById('exp-additive3').value = 'No';
     document.getElementById('exp-mw').value = '';
     document.getElementById('exp-oc').value = '';
+    document.getElementById('exp-bet').value = '';
+    document.getElementById('exp-pore').value = '';
     document.getElementById('exp-capacity').value = '';
 }
 
@@ -893,20 +1199,22 @@ function updateHistoricalRecordsTable() {
     const tbody = document.getElementById('historicalRecordsTable');
     const countSpan = document.getElementById('recordCount');
     if (historicalRecords.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No records</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No records</td></tr>';
         countSpan.innerText = '0';
         return;
     }
     let html = '';
     historicalRecords.forEach((rec, idx) => {
         html += `<tr>
-            <td>${rec.Support}</td>
-            <td>${rec.Amine_1_or_Additive_1}</td>
-            <td>${rec.Amine_2_or_Additive_2}</td>
-            <td>${rec.Amine_3_or_Additive_3}</td>
-            <td>${rec.MW_Mn_g_mol.toFixed(0)}</td>
-            <td>${rec.Organic_Content_pct.toFixed(1)}</td>
-            <td>${rec.CO2_Capacity_mmol_g.toFixed(3)}</td>
+            <td>${rec.Support || ''}</td>
+            <td>${rec.Amine_1_or_Additive_1 || ''}</td>
+            <td>${rec.Amine_2_or_Additive_2 || ''}</td>
+            <td>${rec.Amine_3_or_Additive_3 || ''}</td>
+            <td>${rec.MW_Mn_g_mol ? rec.MW_Mn_g_mol.toFixed(0) : ''}</td>
+            <td>${rec.Organic_Content_pct ? rec.Organic_Content_pct.toFixed(1) : ''}</td>
+            <td>${rec.BET_Bare_Surface_Area_m2_g ? rec.BET_Bare_Surface_Area_m2_g.toFixed(2) : ''}</td>
+            <td>${rec.Average_Bare_Pore_Diameter_nm ? rec.Average_Bare_Pore_Diameter_nm.toFixed(2) : ''}</td>
+            <td>${rec.CO2_Capacity_mmol_g ? rec.CO2_Capacity_mmol_g.toFixed(3) : ''}</td>
             <td><button class="btn btn-sm btn-outline-danger" onclick="removeHistoricalRecord(${idx})"><i class="fas fa-trash"></i></button></td>
         </tr>`;
     });
@@ -970,6 +1278,113 @@ async function loadSystemStatus() {
             document.getElementById('realExperiments').innerText = data.total_experiments;
             document.getElementById('dataPoints').innerText = data.total_data_points;
 
+            // Update conditions display
+            const conditions = data.conditions || {};
+            document.getElementById('displayTemperature').innerText = `${conditions.temperature?.toFixed(1) || 'N/A'}°C`;
+            document.getElementById('displayCO2').innerText = `${conditions.co2Concentration?.toFixed(2) || 'N/A'} vol%`;
+            document.getElementById('displayHumidity').innerText = `${conditions.humidity || 'N/A'}%`;
+            document.getElementById('displayFlowRate').innerText = `${conditions.flowRate?.toFixed(1) || 'N/A'} mL/min`;
+            document.getElementById('displayTestMethod').innerText = conditions.testMethod || 'N/A';
+
+            // Update search bounds display
+            const searchBounds = data.search_bounds || {};
+            const mwRange = searchBounds.mwRange || [0, 10000];
+            const ocRange = searchBounds.ocRange || [0, 100];
+            document.getElementById('displayMWRange').innerText = `${mwRange[0]} - ${mwRange[1]} g/mol`;
+            document.getElementById('displayOCRange').innerText = `${ocRange[0]} - ${ocRange[1]}%`;
+
+            // Display support materials with overflow fix
+            const supports = searchBounds.supports || [];
+            const supportsElement = document.getElementById('displaySupports');
+            if (supports.length > 0) {
+                // Limit to first 3 items and show "+X more" if there are more
+                if (supports.length > 3) {
+                    const shownItems = supports.slice(0, 3).map(s => `<span class="badge bg-secondary me-1">${s}</span>`).join('');
+                    supportsElement.innerHTML = `${shownItems}<span class="badge bg-info ms-1">+${supports.length - 3} more</span>`;
+                } else {
+                    supportsElement.innerHTML = supports.map(s => `<span class="badge bg-secondary me-1">${s}</span>`).join('');
+                }
+            } else {
+                supportsElement.innerHTML = '<span class="badge bg-secondary">None selected</span>';
+            }
+
+            // Display amine 1 materials with overflow fix
+            const amine1 = searchBounds.amine1 || [];
+            const amine1Element = document.getElementById('displayAmine1');
+            if (amine1.length > 0) {
+                // Limit to first 3 items and show "+X more" if there are more
+                if (amine1.length > 3) {
+                    const shownItems = amine1.slice(0, 3).map(a => `<span class="badge bg-secondary me-1">${a}</span>`).join('');
+                    amine1Element.innerHTML = `${shownItems}<span class="badge bg-info ms-1">+${amine1.length - 3} more</span>`;
+                } else {
+                    amine1Element.innerHTML = amine1.map(a => `<span class="badge bg-secondary me-1">${a}</span>`).join('');
+                }
+            } else {
+                amine1Element.innerHTML = '<span class="badge bg-secondary">None selected</span>';
+            }
+
+            // Display amine 2 materials - show all with wrap
+            const amine2 = searchBounds.amine2 || [];
+            const amine2Element = document.getElementById('displayAmine2');
+            if (amine2.length > 0) {
+                amine2Element.innerHTML = amine2.map(a => `<span class="badge bg-secondary me-1 mb-1">${a}</span>`).join('');
+            } else {
+                amine2Element.innerHTML = '<span class="badge bg-secondary">None selected</span>';
+            }
+
+            // Display additive 3 materials - show all with wrap
+            const additive3 = searchBounds.additive3 || [];
+            const additive3Element = document.getElementById('displayAdditive3');
+            if (additive3.length > 0) {
+                additive3Element.innerHTML = additive3.map(a => `<span class="badge bg-secondary me-1 mb-1">${a}</span>`).join('');
+            } else {
+                additive3Element.innerHTML = '<span class="badge bg-secondary">None selected</span>';
+            }
+
+            // Display support-specific ranges for only selected supports with multi-column layout
+            const selectedSupports = searchBounds.supports || [];
+            const supportSpecificRanges = searchBounds.supportSpecificRanges || {};
+            const rangesContainer = document.getElementById('displaySupportSpecificRanges');
+            
+            if (selectedSupports.length > 0) {
+                let rangesHtml = '';
+                
+                // Count how many selected supports have specific ranges defined
+                let supportsWithRanges = 0;
+                for (const support of selectedSupports) {
+                    if (supportSpecificRanges[support]) {
+                        supportsWithRanges++;
+                        
+                        const ranges = supportSpecificRanges[support];
+                        const betRange = ranges.betRange || [0, 1000];
+                        const poreRange = ranges.poreRange || [0, 20];
+                        
+                        // Create a column for each support with its ranges
+                        rangesHtml += `
+                            <div class="col-md-6 col-lg-4 mb-2">
+                                <div class="card">
+                                    <div class="card-header bg-light py-2">
+                                        <strong class="text-primary">${support}</strong>
+                                    </div>
+                                    <div class="card-body py-2">
+                                        <div><strong>BET:</strong> ${betRange[0]}-${betRange[1]} m²/g</div>
+                                        <div><strong>Pore:</strong> ${poreRange[0]}-${poreRange[1]} nm</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+                
+                if (rangesHtml !== '') {
+                    rangesContainer.innerHTML = rangesHtml;
+                } else {
+                    rangesContainer.innerHTML = '<div class="col-12"><em>No support-specific ranges defined for selected supports</em></div>';
+                }
+            } else {
+                rangesContainer.innerHTML = '<div class="col-12"><em>No supports selected</em></div>';
+            }
+
             if (data.best_experiment) {
                 let best = data.best_experiment;
                 let cap = data.best_capacity;
@@ -982,6 +1397,8 @@ async function loadSystemStatus() {
                         <div><strong>Amine 1:</strong> ${best.Amine_1_or_Additive_1 || 'N/A'}</div>
                         <div><strong>MW:</strong> ${best.MW_Mn_g_mol ? best.MW_Mn_g_mol.toFixed(0) : 'N/A'} g/mol</div>
                         <div><strong>Org:</strong> ${best.Organic_Content_pct ? best.Organic_Content_pct.toFixed(1) : 'N/A'}%</div>
+                        <div><strong>BET:</strong> ${best.BET_Bare_Surface_Area_m2_g ? best.BET_Bare_Surface_Area_m2_g.toFixed(2) : 'N/A'} m²/g</div>
+                        <div><strong>Pore:</strong> ${best.Average_Bare_Pore_Diameter_nm ? best.Average_Bare_Pore_Diameter_nm.toFixed(2) : 'N/A'} nm</div>
                     </div>
                 `;
             } else {
@@ -1023,6 +1440,12 @@ async function loadRecentExperiments(sessionId) {
                             <small>${cand.Support || ''}</small>
                             <span class="badge bg-success">${exp.experimental_performance.toFixed(3)}</span>
                         </div>
+                        <small class="text-muted">
+                            ${cand.Amine_1_or_Additive_1 || ''} | 
+                            MW: ${cand.MW_Mn_g_mol ? cand.MW_Mn_g_mol.toFixed(0) : ''} | 
+                            BET: ${cand.BET_Bare_Surface_Area_m2_g ? cand.BET_Bare_Surface_Area_m2_g.toFixed(2) : ''} | 
+                            Pore: ${cand.Average_Bare_Pore_Diameter_nm ? cand.Average_Bare_Pore_Diameter_nm.toFixed(2) : ''}
+                        </small>
                         <small class="text-muted">${new Date(exp.timestamp).toLocaleString()}</small>
                     </div>
                 `;
@@ -1087,7 +1510,9 @@ function displayCandidates(candidates) {
                 </div>
                 <p class="mb-1 small">
                     Support: ${c.Support} · Amine1: ${c.Amine_1_or_Additive_1} ·
-                    MW: ${c.MW_Mn_g_mol.toFixed(0)} · Org: ${c.Organic_Content_pct.toFixed(1)}%
+                    MW: ${c.MW_Mn_g_mol.toFixed(0)} · Org: ${c.Organic_Content_pct.toFixed(1)}% ·
+                    BET: ${c.BET_Bare_Surface_Area_m2_g ? c.BET_Bare_Surface_Area_m2_g.toFixed(2) : 'N/A'} ·
+                    Pore: ${c.Average_Bare_Pore_Diameter_nm ? c.Average_Bare_Pore_Diameter_nm.toFixed(2) : 'N/A'}
                 </p>
                 <button class="btn btn-sm btn-outline-success" onclick="openRecordModal(${idx})">
                     <i class="fas fa-flask me-1"></i>Record
@@ -1110,7 +1535,9 @@ function openRecordModal(idx) {
             Support: ${cand.Support}<br>
             Amine 1: ${cand.Amine_1_or_Additive_1}<br>
             MW: ${cand.MW_Mn_g_mol.toFixed(0)} g/mol<br>
-            Org: ${cand.Organic_Content_pct.toFixed(1)}%
+            Org: ${cand.Organic_Content_pct.toFixed(1)}%<br>
+            BET: ${cand.BET_Bare_Surface_Area_m2_g ? cand.BET_Bare_Surface_Area_m2_g.toFixed(2) : 'N/A'} m²/g<br>
+            Pore: ${cand.Average_Bare_Pore_Diameter_nm ? cand.Average_Bare_Pore_Diameter_nm.toFixed(2) : 'N/A'} nm
         </p>
         <p>Predicted: <strong>${cand.Predicted_CO2_Capacity_mmol_g.toFixed(4)} mmol/g</strong></p>
         <label>Measured Capacity (mmol/g):</label>
