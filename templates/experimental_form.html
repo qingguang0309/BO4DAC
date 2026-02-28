@@ -155,13 +155,6 @@
                             </select>
                         </div>
 
-                        <div class="mb-3">
-                            <label for="additive3" class="form-label">Amine 3 / Additive 3</label>
-                            <select class="form-select" id="additive3">
-                                <option value="No">No</option>
-                                <option value="CTAC">CTAC</option>
-                            </select>
-                        </div>
                     </div>
 
                     <div class="col-md-6">
@@ -246,7 +239,6 @@
                     Support: document.getElementById('support').value,
                     "Amine_1_or_Additive_1": document.getElementById('amine1').value,
                     "Amine_2_or_Additive_2": document.getElementById('amine2').value,
-                    "Amine_3_or_Additive_3": document.getElementById('additive3').value,
                     "Organic_Content_pct": parseFloat(document.getElementById('organicContent').value),
                     "CO2_Capacity_mmol_g": parseFloat(document.getElementById('capacity').value),
                     "Temperature": parseFloat(document.getElementById('temperature').value),
@@ -283,7 +275,6 @@
                     document.getElementById('flowRate').value = '100.0';
                     document.getElementById('testMethod').value = 'TGA';
                     document.getElementById('amine2').value = 'No';
-                    document.getElementById('additive3').value = 'No';
                 } else {
                     alert(`Error: ${result.error}`);
                 }

@@ -171,7 +171,7 @@ function displayRecommendations(candidates) {
                     <div class="card-body">
                         <div class="row">
         `;
-        const fields = ['Support', 'Amine_1_or_Additive_1', 'Organic_Content_pct'];
+        const fields = ['Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2', 'Organic_Content_pct'];
         fields.forEach(f => {
             if (cand[f]) {
                 html += `<div class="col-6"><small><strong>${f.replace(/_/g, ' ')}:</strong> ${cand[f]}</small></div>`;

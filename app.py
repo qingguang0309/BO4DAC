@@ -38,9 +38,8 @@ CORS(app)
 # ----------------------------------------------------------------------
 FEATURE_ORDER = [
     'Support',
-    'Amine_1_or_Additive_1', 
+    'Amine_1_or_Additive_1',
     'Amine_2_or_Additive_2',
-    'Amine_3_or_Additive_3',
     'Organic_Content_pct',
     'BET_Bare_Surface_Area_m2_g',
     'Average_Bare_Pore_Diameter_nm'
@@ -110,8 +109,7 @@ def create_bo_system(session_id):
     categorical_bounds = {
         "Support": search_bounds.get('supports', []),
         "Amine_1_or_Additive_1": search_bounds.get('amine1', []),
-        "Amine_2_or_Additive_2": search_bounds.get('amine2', []),
-        "Amine_3_or_Additive_3": search_bounds.get('additive3', [])
+        "Amine_2_or_Additive_2": search_bounds.get('amine2', [])
     }
 
     mw_range = search_bounds.get('mwRange', [0, 10000])
@@ -237,7 +235,6 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
         'Organic_Content_pct': 'Organic_Content_pct',
         'CO2_Capacity_mmol_g': 'CO2_Capacity_mmol_g',
         'Amine_2_or_Additive_2': 'Amine_2_or_Additive_2',
-        'Amine_3_or_Additive_3': 'Amine_3_or_Additive_3',
         'BET_Bare_Surface_Area_m2_g': 'BET_Bare_Surface_Area_m2_g',
         'Average_Bare_Pore_Diameter_nm': 'Average_Bare_Pore_Diameter_nm',
         'Adsorption_Temperature_C': 'Temperature',
@@ -324,12 +321,6 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
         if amine2 not in allowed_amine2:
             continue
 
-        # Amine 3: similarly
-        amine3_raw = row.get('Amine_3_or_Additive_3')
-        amine3 = 'No' if amine3_raw == 0 or amine3_raw == '0' or pd.isna(amine3_raw) else str(amine3_raw)
-        if amine3 not in allowed_amine3:
-            continue
-
         # --- Continuous filters ---
         oc = row.get('Organic_Content_pct')
         bet = row.get('BET_Bare_Surface_Area_m2_g')
@@ -409,7 +400,6 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             'Support': support,
             'Amine_1_or_Additive_1': amine1,
             'Amine_2_or_Additive_2': amine2,
-            'Amine_3_or_Additive_3': amine3,
             'Organic_Content_pct': oc,
             'BET_Bare_Surface_Area_m2_g': bet,
             'Average_Bare_Pore_Diameter_nm': pore
@@ -484,7 +474,6 @@ def api_init():
             'Support': rec.get('Support'),
             'Amine_1_or_Additive_1': rec.get('Amine_1_or_Additive_1'),
             'Amine_2_or_Additive_2': rec.get('Amine_2_or_Additive_2', 'No'),
-            'Amine_3_or_Additive_3': rec.get('Amine_3_or_Additive_3', 'No'),
             'Organic_Content_pct': float(rec.get('Organic_Content_pct', 0)),
             'BET_Bare_Surface_Area_m2_g': float(rec.get('BET_Bare_Surface_Area_m2_g', 0)),
             'Average_Bare_Pore_Diameter_nm': float(rec.get('Average_Bare_Pore_Diameter_nm', 0))

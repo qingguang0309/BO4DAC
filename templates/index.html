@@ -236,7 +236,9 @@
                         <button class="btn btn-sm btn-outline-primary" onclick="selectAll('amine1')">Select All</button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="deselectAll('amine1')">Deselect All</button>
                     </div>
-                    <h5 class="mt-4">Amine 2 / Additive 2</h5>
+                </div>
+                <div class="col-md-4">
+                    <h5>Amine 2 / Additive 2</h5>
                     <div class="multi-select-container" id="amine2Container"></div>
                     <div class="mt-2">
                         <button class="btn btn-sm btn-outline-primary" onclick="selectAll('amine2')">Select All</button>
@@ -255,11 +257,6 @@
                     </div>
                 </div>
             </div>
-            <!-- Additive 3 (badge style) -->
-            <div class="mt-3">
-                <h5>Additive 3</h5>
-                <div id="additive3Container"></div>
-            </div>
             
             <!-- Support-Specific Ranges Section -->
             <div class="card mt-4" id="supportSpecificRangesCard" style="display: none;">
@@ -277,10 +274,9 @@
                 <div class="card-header"><i class="fas fa-list-check me-2"></i>Search Space Summary</div>
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-3"><strong>Supports:</strong> <span id="summarySupports">0 selected</span></div>
-                        <div class="col-md-3"><strong>Amine 1:</strong> <span id="summaryAmine1">0 selected</span></div>
-                        <div class="col-md-3"><strong>Amine 2:</strong> <span id="summaryAmine2">0 selected</span></div>
-                        <div class="col-md-3"><strong>Additive 3:</strong> <span id="summaryAdditive3">0 selected</span></div>
+                        <div class="col-md-4"><strong>Supports:</strong> <span id="summarySupports">0 selected</span></div>
+                        <div class="col-md-4"><strong>Amine 1:</strong> <span id="summaryAmine1">0 selected</span></div>
+                        <div class="col-md-4"><strong>Amine 2:</strong> <span id="summaryAmine2">0 selected</span></div>
                     </div>
                     <div class="row mt-2">
                         <div class="col-md-6"><strong>Organic Content:</strong> <span id="summaryOCRange">0 - 100</span> %</div>
@@ -406,7 +402,6 @@
                             <select id="exp-support" class="form-select mb-2"><option value="">Support</option></select>
                             <select id="exp-amine1" class="form-select mb-2"><option value="">Amine 1</option></select>
                             <select id="exp-amine2" class="form-select mb-2"><option value="No">No</option></select>
-                            <select id="exp-additive3" class="form-select mb-2"><option value="No">No</option></select>
                             <input type="number" id="exp-oc" class="form-control mb-2" placeholder="Organic Content (%)" step="0.1">
                             <input type="number" id="exp-bet" class="form-control mb-2" placeholder="BET Surface Area (m²/g)" step="0.1">
                             <input type="number" id="exp-pore" class="form-control mb-2" placeholder="Pore Diameter (nm)" step="0.1">
@@ -432,7 +427,6 @@
                                     <th>Support</th>
                                     <th>Amine1</th>
                                     <th>Amine2</th>
-                                    <th>Add3</th>
                                                                         <th>OC%</th>
                                     <th>BET</th>
                                     <th>Pore</th>
@@ -445,11 +439,11 @@
                             </tbody>
                         </table>
                     </div>
-                    <div class="text-end mt-3">
-                        <button class="btn btn-success" onclick="submitHistoricalRecords()">
-                            <i class="fas fa-database-check me-2"></i>Initialize System
-                        </button>
-                    </div>
+<!--                    <div class="text-end mt-3">-->
+<!--                        <button class="btn btn-success" onclick="submitHistoricalRecords()">-->
+<!--                            <i class="fas fa-database-check me-2"></i>Initialize System-->
+<!--                        </button>-->
+<!--                    </div>-->
                 </div>
             </div>
             <div class="d-flex justify-content-between mt-4">
@@ -512,8 +506,6 @@
                         </div>
                         <div class="row mt-2">
                             <div class="col-12">
-                                <strong>Additive 3:</strong> 
-                                <div id="displayAdditive3" class="d-flex flex-wrap gap-1 mt-1" style="min-height: 30px;"></div>
                             </div>
                         </div>
                         <div class="row mt-2">
@@ -639,12 +631,6 @@
                                     </select>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Amine 3 / Additive 3</label>
-                                    <select id="exp-additive3-modal" class="form-select">
-                                        <option value="No">No</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-6 mb-3">
                                     <label class="form-label">Organic Content (%)</label>
                                     <input type="number" id="exp-oc-modal" class="form-control" step="0.1" placeholder="e.g., 25.0">
                                 </div>
@@ -740,15 +726,13 @@ const DEFAULT_CONFIG = {
         'PEG1000', 'CTAC', 'DPPD', 'TBD', 'DBPD', 'BHT', 'PET', 'TDE',
         'HEDS', 'DTDP', 'BTES', 'APTES', 'TEOT', 'CTMA+'
     ],
-    additive3: ['No', 'CTAC']
 };
 
 let currentStep = 1;
 let searchBounds = {
-    supports: [...DEFAULT_CONFIG.supports],
-    amine1: [...DEFAULT_CONFIG.amine1],
-    amine2: [...DEFAULT_CONFIG.amine2],
-    additive3: [...DEFAULT_CONFIG.additive3],
+    supports: [DEFAULT_CONFIG.supports[0]],
+    amine1: [DEFAULT_CONFIG.amine1[0]],
+    amine2: [DEFAULT_CONFIG.amine2[0]],
     ocRange: [0, 100]
 };
 let conditions = {
@@ -850,16 +834,6 @@ function initMultiSelect() {
         amine2Container.appendChild(div);
     });
 
-    // Additive 3 (badges)
-    const additive3Container = document.getElementById('additive3Container');
-    additive3Container.innerHTML = '';
-    DEFAULT_CONFIG.additive3.forEach(a => {
-        const span = document.createElement('span');
-        span.className = `config-badge ${searchBounds.additive3.includes(a) ? 'selected' : ''}`;
-        span.innerHTML = `${a}<i class="fas fa-check-circle ms-1 badge-check"></i>`;
-        span.onclick = () => toggleBadge('additive3', a, span);
-        additive3Container.appendChild(span);
-    });
 
     // OC Sliders
     document.getElementById('ocMinSlider').value = searchBounds.ocRange[0];
@@ -894,7 +868,6 @@ function updateStep1Summary() {
     document.getElementById('summarySupports').innerText = searchBounds.supports.length + ' selected';
     document.getElementById('summaryAmine1').innerText = searchBounds.amine1.length + ' selected';
     document.getElementById('summaryAmine2').innerText = searchBounds.amine2.length + ' selected';
-    document.getElementById('summaryAdditive3').innerText = searchBounds.additive3.length + ' selected';
     document.getElementById('summaryOCRange').innerText = searchBounds.ocRange[0] + ' - ' + searchBounds.ocRange[1] + ' %';
     
     // Update support-specific ranges display
@@ -1171,7 +1144,6 @@ function populateHistoricalForm() {
     let suppOpts = searchBounds.supports.length ? searchBounds.supports : DEFAULT_CONFIG.supports;
     let a1Opts = searchBounds.amine1.length ? searchBounds.amine1 : DEFAULT_CONFIG.amine1;
     let a2Opts = searchBounds.amine2.length ? searchBounds.amine2 : DEFAULT_CONFIG.amine2;
-    let a3Opts = searchBounds.additive3.length ? searchBounds.additive3 : DEFAULT_CONFIG.additive3;
 
     let sel = document.getElementById('exp-support');
     sel.innerHTML = '<option value="">Support</option>';
@@ -1182,9 +1154,6 @@ function populateHistoricalForm() {
     sel = document.getElementById('exp-amine2');
     sel.innerHTML = '<option value="No">No</option>';
     a2Opts.forEach(a => { if (a !== 'No') sel.innerHTML += `<option value="${a}">${a}</option>`; });
-    sel = document.getElementById('exp-additive3');
-    sel.innerHTML = '<option value="No">No</option>';
-    a3Opts.forEach(a => { if (a !== 'No') sel.innerHTML += `<option value="${a}">${a}</option>`; });
 }
 
 async function uploadHistoricalData() {
@@ -1216,7 +1185,6 @@ async function uploadHistoricalData() {
                 Support: record['Support'] || '',
                 Amine_1_or_Additive_1: record['Amine_1_or_Additive_1'] || record['Amine1'] || '',
                 Amine_2_or_Additive_2: record['Amine_2_or_Additive_2'] || record['Amine2'] || 'No',
-                Amine_3_or_Additive_3: record['Amine_3_or_Additive_3'] || record['Additive3'] || 'No',
                 Organic_Content_pct: parseFloat(record['Organic_Content_pct'] || record['OC'] || 0),
                 CO2_Capacity_mmol_g: parseFloat(record['CO2_Capacity_mmol_g'] || record['Capacity'] || 0)
             };
@@ -1239,7 +1207,6 @@ function addIndividualRecord() {
     let support = document.getElementById('exp-support').value;
     let amine1 = document.getElementById('exp-amine1').value;
     let amine2 = document.getElementById('exp-amine2').value;
-    let additive3 = document.getElementById('exp-additive3').value;
     let oc = parseFloat(document.getElementById('exp-oc').value);
     let bet = parseFloat(document.getElementById('exp-bet').value);
     let pore = parseFloat(document.getElementById('exp-pore').value);
@@ -1252,7 +1219,6 @@ function addIndividualRecord() {
         Support: support,
         Amine_1_or_Additive_1: amine1,
         Amine_2_or_Additive_2: amine2,
-        Amine_3_or_Additive_3: additive3,
         Organic_Content_pct: oc,
         BET_Bare_Surface_Area_m2_g: isNaN(bet) ? 0.0 : bet,
         Average_Bare_Pore_Diameter_nm: isNaN(pore) ? 0.0 : pore,
@@ -1264,7 +1230,6 @@ function addIndividualRecord() {
     document.getElementById('exp-support').value = '';
     document.getElementById('exp-amine1').value = '';
     document.getElementById('exp-amine2').value = 'No';
-    document.getElementById('exp-additive3').value = 'No';
     document.getElementById('exp-oc').value = '';
     document.getElementById('exp-bet').value = '';
     document.getElementById('exp-pore').value = '';
@@ -1285,7 +1250,6 @@ function updateHistoricalRecordsTable() {
             <td>${rec.Support || ''}</td>
             <td>${rec.Amine_1_or_Additive_1 || ''}</td>
             <td>${rec.Amine_2_or_Additive_2 || ''}</td>
-            <td>${rec.Amine_3_or_Additive_3 || ''}</td>
             <td>${rec.Organic_Content_pct ? rec.Organic_Content_pct.toFixed(1) : ''}</td>
             <td>${rec.BET_Bare_Surface_Area_m2_g ? rec.BET_Bare_Surface_Area_m2_g.toFixed(2) : ''}</td>
             <td>${rec.Average_Bare_Pore_Diameter_nm ? rec.Average_Bare_Pore_Diameter_nm.toFixed(2) : ''}</td>
@@ -1411,13 +1375,6 @@ async function loadSystemStatus() {
             }
 
             // Display additive 3 materials - show all with wrap
-            const additive3 = searchBounds.additive3 || [];
-            const additive3Element = document.getElementById('displayAdditive3');
-            if (additive3.length > 0) {
-                additive3Element.innerHTML = additive3.map(a => `<span class="badge bg-secondary me-1 mb-1">${a}</span>`).join('');
-            } else {
-                additive3Element.innerHTML = '<span class="badge bg-secondary">None selected</span>';
-            }
 
             // Display support-specific ranges for only selected supports with multi-column layout
             const selectedSupports = searchBounds.supports || [];
@@ -1473,6 +1430,7 @@ async function loadSystemStatus() {
                         <hr>
                         <div><strong>Support:</strong> ${best.Support || 'N/A'}</div>
                         <div><strong>Amine 1:</strong> ${best.Amine_1_or_Additive_1 || 'N/A'}</div>
+                        <div><strong>Amine 2:</strong> ${best.Amine_2_or_Additive_2 || 'N/A'}</div>
                         <div><strong>Org:</strong> ${best.Organic_Content_pct ? best.Organic_Content_pct.toFixed(1) : 'N/A'}%</div>
                         <div><strong>BET:</strong> ${best.BET_Bare_Surface_Area_m2_g ? best.BET_Bare_Surface_Area_m2_g.toFixed(2) : 'N/A'} m²/g</div>
                         <div><strong>Pore:</strong> ${best.Average_Bare_Pore_Diameter_nm ? best.Average_Bare_Pore_Diameter_nm.toFixed(2) : 'N/A'} nm</div>
@@ -1514,7 +1472,7 @@ async function loadRecentExperiments(sessionId) {
                 html += `
                     <div class="list-group-item exp-list-item" data-exp-index="${index}" data-exp-data='${JSON.stringify(exp).replace(/'/g, '&apos;')}'>
                         <div class="d-flex justify-content-between">
-                            <small>${cand.Support || ''}|${cand.Amine_1_or_Additive_1 || ''}|${cand.Organic_Content_pct ? cand.Organic_Content_pct.toFixed(1) : ''}%</small>
+                            <small>${cand.Support || ''}|${cand.Amine_1_or_Additive_1 || ''}|${cand.Amine_2_or_Additive_2 || ''}|${cand.Organic_Content_pct ? cand.Organic_Content_pct.toFixed(1) : ''}%</small>
                             <span class="badge bg-success">${exp.experimental_performance.toFixed(3)}</span>
                         </div>
                         <small class="text-muted">${new Date(exp.timestamp).toLocaleString()}</small>
@@ -1594,7 +1552,7 @@ function displayCandidates(candidates) {
                     <small class="text-info">EI: ${c.Expected_Improvement.toFixed(4)}</small>
                 </div>
                 <p class="mb-1 small">
-                    Support: ${c.Support} · Amine1: ${c.Amine_1_or_Additive_1} ·
+                    Support: ${c.Support} · Amine1: ${c.Amine_1_or_Additive_1} · Amine2: ${c.Amine_2_or_Additive_2} ·
                     Org: ${c.Organic_Content_pct.toFixed(1)}% ·
                     BET: ${c.BET_Bare_Surface_Area_m2_g ? c.BET_Bare_Surface_Area_m2_g.toFixed(2) : 'N/A'} ·
                     Pore: ${c.Average_Bare_Pore_Diameter_nm ? c.Average_Bare_Pore_Diameter_nm.toFixed(2) : 'N/A'}
@@ -1623,7 +1581,6 @@ function openRecordModal(idx) {
     document.getElementById('exp-support-modal').value = cand.Support || '';
     document.getElementById('exp-amine1-modal').value = cand.Amine_1_or_Additive_1 || '';
     document.getElementById('exp-amine2-modal').value = cand.Amine_2_or_Additive_2 || 'No';
-    document.getElementById('exp-additive3-modal').value = cand.Amine_3_or_Additive_3 || 'No';
     document.getElementById('exp-oc-modal').value = cand.Organic_Content_pct || '';
     document.getElementById('exp-bet-modal').value = cand.BET_Bare_Surface_Area_m2_g || '';
     document.getElementById('exp-pore-modal').value = cand.Average_Bare_Pore_Diameter_nm || '';
@@ -1641,12 +1598,15 @@ function openRecordModal(idx) {
 
 // Function to prepare the modal specifically for a candidate from the list
 function prepareRecordModalForCandidate(idx) {
+    // Additional check to ensure dropdowns have values if searchBounds is not available
+    ensureDropdownHasOptions();
     // Ensure we're using the global currentCandidates array
     if (!window.currentCandidates || window.currentCandidates.length <= idx) {
         showNotification('Candidate data not available', 'warning');
         return;
     }
     openRecordModal(idx);
+
 }
 
 // This function is deprecated - keeping for compatibility but shouldn't be used
@@ -1669,7 +1629,6 @@ async function submitExperiment(idx) {
             'Support': cand.Support,
             'Amine_1_or_Additive_1': cand.Amine_1_or_Additive_1,
             'Amine_2_or_Additive_2': cand.Amine_2_or_Additive_2,
-            'Amine_3_or_Additive_3': cand.Amine_3_or_Additive_3,
             'Organic_Content_pct': cand.Organic_Content_pct,
             'BET_Bare_Surface_Area_m2_g': cand.BET_Bare_Surface_Area_m2_g,
             'Average_Bare_Pore_Diameter_nm': cand.Average_Bare_Pore_Diameter_nm,
@@ -1730,9 +1689,6 @@ function ensureDropdownHasOptions() {
     const amine2 = (window.searchBounds && window.searchBounds.amine2 && window.searchBounds.amine2.length > 0)
         ? window.searchBounds.amine2
         : DEFAULT_CONFIG.amine2;
-    const additive3 = (window.searchBounds && window.searchBounds.additive3 && window.searchBounds.additive3.length > 0)
-        ? window.searchBounds.additive3
-        : DEFAULT_CONFIG.additive3;
 
     // Populate support dropdown
     const supportSelect = document.getElementById('exp-support-modal');
@@ -1773,21 +1729,10 @@ function ensureDropdownHasOptions() {
         });
     }
 
-    // Populate additive3 dropdown
-    const additive3Select = document.getElementById('exp-additive3-modal');
-    if (additive3Select && additive3Select.options.length <= 1) { // Only has default option
-        additive3.forEach(a => {
-            if (a !== 'No' && !Array.from(additive3Select.options).some(opt => opt.value === a)) {
-                const option = document.createElement('option');
-                option.value = a;
-                option.textContent = a;
-                additive3Select.appendChild(option);
-            }
-        });
-    }
 }
 
 function populateRecordExperimentForm() {
+
     // Get available options from current session bounds, falling back to default config
     const supports = (window.searchBounds && window.searchBounds.supports && window.searchBounds.supports.length > 0)
         ? window.searchBounds.supports
@@ -1798,9 +1743,6 @@ function populateRecordExperimentForm() {
     const amine2 = (window.searchBounds && window.searchBounds.amine2 && window.searchBounds.amine2.length > 0)
         ? window.searchBounds.amine2
         : DEFAULT_CONFIG.amine2;
-    const additive3 = (window.searchBounds && window.searchBounds.additive3 && window.searchBounds.additive3.length > 0)
-        ? window.searchBounds.additive3
-        : DEFAULT_CONFIG.additive3;
 
     // Populate support dropdown
     const supportSelect = document.getElementById('exp-support-modal');
@@ -1834,18 +1776,6 @@ function populateRecordExperimentForm() {
         }
     });
 
-    // Populate additive3 dropdown
-    const additive3Select = document.getElementById('exp-additive3-modal');
-    additive3Select.innerHTML = '<option value="No">No</option>';
-    additive3.forEach(a => {
-        if (a !== 'No') {
-            const option = document.createElement('option');
-            option.value = a;
-            option.textContent = a;
-            additive3Select.appendChild(option);
-        }
-    });
-
     // Set default values based on current conditions if available
     if (window.conditions) {
         document.getElementById('exp-temp-modal').value = conditions.temperature || 25.0;
@@ -1854,6 +1784,8 @@ function populateRecordExperimentForm() {
         document.getElementById('exp-flow-modal').value = conditions.flowRate || 100.0;
         document.getElementById('exp-test-method-modal').value = conditions.testMethod || 'TGA';
     }
+
+
 }
 
 function submitExperimentFromModal() {
@@ -1861,7 +1793,6 @@ function submitExperimentFromModal() {
     const supportEl = document.getElementById('exp-support-modal');
     const amine1El = document.getElementById('exp-amine1-modal');
     const amine2El = document.getElementById('exp-amine2-modal');
-    const additive3El = document.getElementById('exp-additive3-modal');
     const ocEl = document.getElementById('exp-oc-modal');
     const betEl = document.getElementById('exp-bet-modal');
     const poreEl = document.getElementById('exp-pore-modal');
@@ -1871,7 +1802,6 @@ function submitExperimentFromModal() {
         'Support': supportEl ? supportEl.value : '',
         'Amine_1_or_Additive_1': amine1El ? amine1El.value : '',
         'Amine_2_or_Additive_2': amine2El ? amine2El.value : 'No',
-        'Amine_3_or_Additive_3': additive3El ? additive3El.value : 'No',
         'Organic_Content_pct': ocEl && ocEl.value ? parseFloat(ocEl.value) : 0,
         'BET_Bare_Surface_Area_m2_g': betEl && betEl.value ? parseFloat(betEl.value) : 0,
         'Average_Bare_Pore_Diameter_nm': poreEl && poreEl.value ? parseFloat(poreEl.value) : 0
@@ -1999,7 +1929,6 @@ function showExperimentDetails(index, experiment) {
                                     <li><strong>Support:</strong> ${experiment.candidate?.Support || 'N/A'}</li>
                                     <li><strong>Amine 1:</strong> ${experiment.candidate?.Amine_1_or_Additive_1 || 'N/A'}</li>
                                     <li><strong>Amine 2:</strong> ${experiment.candidate?.Amine_2_or_Additive_2 || 'N/A'}</li>
-                                    <li><strong>Amine 3:</strong> ${experiment.candidate?.Amine_3_or_Additive_3 || 'N/A'}</li>
                                     <li><strong>Organic Content (%):</strong> ${experiment.candidate?.Organic_Content_pct ? experiment.candidate.Organic_Content_pct.toFixed(2) : 'N/A'}</li>
                                     <li><strong>BET Surface Area (m²/g):</strong> ${experiment.candidate?.BET_Bare_Surface_Area_m2_g ? experiment.candidate.BET_Bare_Surface_Area_m2_g.toFixed(2) : 'N/A'}</li>
                                     <li><strong>Pore Diameter (nm):</strong> ${experiment.candidate?.Average_Bare_Pore_Diameter_nm ? experiment.candidate.Average_Bare_Pore_Diameter_nm.toFixed(2) : 'N/A'}</li>

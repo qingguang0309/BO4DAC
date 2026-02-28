@@ -55,8 +55,7 @@
                                 <th>Support</th>
                                 <th>Amine 1</th>
                                 <th>Amine 2</th>
-                                <th>Additive 3</th>
-                                <th>Org. (%)</th>
+                                                                <th>Org. (%)</th>
                                 <th>Predicted</th>
                                 <th>Actual</th>
                                 <th>Error %</th>
@@ -134,7 +133,6 @@ function renderTable() {
         const support = cand.Support || '-';
         const amine1 = cand.Amine_1_or_Additive_1 || '-';
         const amine2 = cand.Amine_2_or_Additive_2 || '-';
-        const amine3 = cand.Amine_3_or_Additive_3 || '-';
         const pred = exp.predicted_performance || 0;
         const act = exp.experimental_performance || 0;
         const error = act > 0 ? ((act - pred) / act * 100).toFixed(1) : '-';
@@ -146,7 +144,6 @@ function renderTable() {
             <td>${support}</td>
             <td>${amine1}</td>
             <td>${amine2}</td>
-            <td>${amine3}</td>
             <td>${cand.Organic_Content_pct ? cand.Organic_Content_pct.toFixed(1) : '-'}</td>
             <td>${pred.toFixed(3)}</td>
             <td><strong>${act.toFixed(3)}</strong></td>

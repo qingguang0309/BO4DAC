@@ -63,14 +63,13 @@ class DACOptimizer:
         'Support',
         'Amine_1_or_Additive_1',
         'Amine_2_or_Additive_2',
-        'Amine_3_or_Additive_3',
         'Organic_Content_pct',
         'BET_Bare_Surface_Area_m2_g',
         'Average_Bare_Pore_Diameter_nm'
     ]
     # Indices for categorical / continuous features (0‑based)
-    CATEGORICAL_DIMS = [0, 1, 2, 3]
-    CONTINUOUS_DIMS = [4, 5, 6]
+    CATEGORICAL_DIMS = [0, 1, 2]
+    CONTINUOUS_DIMS = [3, 4, 5]
 
     def __init__(self,
                  categorical_bounds: Dict[str, List[str]],
@@ -95,7 +94,6 @@ class DACOptimizer:
         self.unique_supports = categorical_bounds.get('Support', ['SBA-15'])
         self.unique_amines1 = categorical_bounds.get('Amine_1_or_Additive_1', ['No'])
         self.unique_amines2 = categorical_bounds.get('Amine_2_or_Additive_2', ['No'])
-        self.unique_amines3 = categorical_bounds.get('Amine_3_or_Additive_3', ['No'])
 
         # Build optimisation bounds tensor
         self.bounds = self._init_bounds_tensor()
@@ -113,7 +111,6 @@ class DACOptimizer:
         n_supports = len(self.unique_supports)
         n_amines1 = len(self.unique_amines1)
         n_amines2 = len(self.unique_amines2)
-        n_amines3 = len(self.unique_amines3)
 
         # Continuous bounds with safe fallback
         oc_min, oc_max = self.continuous_bounds.get('Organic_Content_pct', (0, 100))
@@ -129,14 +126,13 @@ class DACOptimizer:
             pore_max = pore_min + 5
 
         lower = torch.tensor([
-            0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0,
             oc_min, bet_min, pore_min
         ], dtype=torch.float32)
         upper = torch.tensor([
             max(0.0, n_supports - 1.0),
             max(0.0, n_amines1 - 1.0),
             max(0.0, n_amines2 - 1.0),
-            max(0.0, n_amines3 - 1.0),
             oc_max, bet_max, pore_max
         ], dtype=torch.float32)
         return torch.stack([lower, upper])
@@ -168,24 +164,22 @@ class DACOptimizer:
         support_idx = int(torch.clamp(torch.round(X[0]), 0, len(self.unique_supports) - 1).item())
         amine1_idx = int(torch.clamp(torch.round(X[1]), 0, len(self.unique_amines1) - 1).item())
         amine2_idx = int(torch.clamp(torch.round(X[2]), 0, len(self.unique_amines2) - 1).item())
-        amine3_idx = int(torch.clamp(torch.round(X[3]), 0, len(self.unique_amines3) - 1).item())
 
         config = {
             'Support': self.unique_supports[support_idx],
             'Amine_1_or_Additive_1': self.unique_amines1[amine1_idx],
             'Amine_2_or_Additive_2': self.unique_amines2[amine2_idx],
-            'Amine_3_or_Additive_3': self.unique_amines3[amine3_idx],
-            'Organic_Content_pct': float(X[4].item()),
-            'BET_Bare_Surface_Area_m2_g': float(X[5].item()),
-            'Average_Bare_Pore_Diameter_nm': float(X[6].item())
+            'Organic_Content_pct': float(X[3].item()),
+            'BET_Bare_Surface_Area_m2_g': float(X[4].item()),
+            'Average_Bare_Pore_Diameter_nm': float(X[5].item())
         }
         # Clamp continuous values to bounds (already done by generation, but safe)
-        config['Organic_Content_pct'] = max(self.bounds[0, 4].item(),
-                                            min(self.bounds[1, 4].item(), config['Organic_Content_pct']))
-        config['BET_Bare_Surface_Area_m2_g'] = max(self.bounds[0, 5].item(),
-                                                   min(self.bounds[1, 5].item(), config['BET_Bare_Surface_Area_m2_g']))
-        config['Average_Bare_Pore_Diameter_nm'] = max(self.bounds[0, 6].item(),
-                                                      min(self.bounds[1, 6].item(),
+        config['Organic_Content_pct'] = max(self.bounds[0, 3].item(),
+                                            min(self.bounds[1, 3].item(), config['Organic_Content_pct']))
+        config['BET_Bare_Surface_Area_m2_g'] = max(self.bounds[0, 4].item(),
+                                                   min(self.bounds[1, 4].item(), config['BET_Bare_Surface_Area_m2_g']))
+        config['Average_Bare_Pore_Diameter_nm'] = max(self.bounds[0, 5].item(),
+                                                      min(self.bounds[1, 5].item(),
                                                           config['Average_Bare_Pore_Diameter_nm']))
         # Round continuous values for readability
         config['Organic_Content_pct'] = round(config['Organic_Content_pct'], 1)

@@ -34,7 +34,6 @@ class ConfigManager:
                 "Support",
                 "Amine_1_or_Additive_1",
                 "Amine_2_or_Additive_2",
-                "Amine_3_or_Additive_3"
             ],
             "target_columns": ["CO2_Capacity_mmol_g"],
             "bounds": {
