@@ -168,8 +168,6 @@
                         <h3 class="section-title">Physical Properties</h3>
                         
                         <div class="mb-3">
-                            <label for="mw" class="form-label required">MW Mn (g/mol)</label>
-                            <input type="number" class="form-control" id="mw" min="0" max="20000" step="100" placeholder="e.g., 500.0" required>
                         </div>
 
                         <div class="mb-3">
@@ -249,7 +247,6 @@
                     "Amine_1_or_Additive_1": document.getElementById('amine1').value,
                     "Amine_2_or_Additive_2": document.getElementById('amine2').value,
                     "Amine_3_or_Additive_3": document.getElementById('additive3').value,
-                    "MW_Mn_g_mol": parseFloat(document.getElementById('mw').value),
                     "Organic_Content_pct": parseFloat(document.getElementById('organicContent').value),
                     "CO2_Capacity_mmol_g": parseFloat(document.getElementById('capacity').value),
                     "Temperature": parseFloat(document.getElementById('temperature').value),
@@ -262,7 +259,7 @@
             };
 
             if (!formData.experiments[0].Support || !formData.experiments[0]["Amine_1_or_Additive_1"] ||
-                !formData.experiments[0]["MW_Mn_g_mol"] || !formData.experiments[0]["Organic_Content_pct"] ||
+                !formData.experiments[0]["Organic_Content_pct"] ||
                 !formData.experiments[0]["CO2_Capacity_mmol_g"]) {
                 alert('Please fill in all required fields.');
                 return;

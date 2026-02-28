@@ -56,7 +56,6 @@
                                 <th>Amine 1</th>
                                 <th>Amine 2</th>
                                 <th>Additive 3</th>
-                                <th>MW (g/mol)</th>
                                 <th>Org. (%)</th>
                                 <th>Predicted</th>
                                 <th>Actual</th>
@@ -148,7 +147,6 @@ function renderTable() {
             <td>${amine1}</td>
             <td>${amine2}</td>
             <td>${amine3}</td>
-            <td>${cand.MW_Mn_g_mol ? cand.MW_Mn_g_mol.toFixed(0) : '-'}</td>
             <td>${cand.Organic_Content_pct ? cand.Organic_Content_pct.toFixed(1) : '-'}</td>
             <td>${pred.toFixed(3)}</td>
             <td><strong>${act.toFixed(3)}</strong></td>

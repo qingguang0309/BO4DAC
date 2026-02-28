@@ -38,10 +38,9 @@ CORS(app)
 # ----------------------------------------------------------------------
 FEATURE_ORDER = [
     'Support',
-    'Amine_1_or_Additive_1',
+    'Amine_1_or_Additive_1', 
     'Amine_2_or_Additive_2',
     'Amine_3_or_Additive_3',
-    'MW_Mn_g_mol',
     'Organic_Content_pct',
     'BET_Bare_Surface_Area_m2_g',
     'Average_Bare_Pore_Diameter_nm'
@@ -157,7 +156,6 @@ def create_bo_system(session_id):
         pore_range = [0, 20]
     
     continuous_bounds = {
-        "MW_Mn_g_mol": (float(mw_range[0]), float(mw_range[1])),
         "Organic_Content_pct": (float(oc_range[0]), float(oc_range[1])),
         "BET_Bare_Surface_Area_m2_g": (float(bet_range[0]), float(bet_range[1])),
         "Average_Bare_Pore_Diameter_nm": (float(pore_range[0]), float(pore_range[1]))
@@ -236,7 +234,6 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
     col_map = {
         'Support': 'Support',
         'Amine_1_or_Additive_1': 'Amine_1_or_Additive_1',
-        'MW_Mn_g_mol': 'MW_Mn_g_mol',
         'Organic_Content_pct': 'Organic_Content_pct',
         'CO2_Capacity_mmol_g': 'CO2_Capacity_mmol_g',
         'Amine_2_or_Additive_2': 'Amine_2_or_Additive_2',
@@ -334,22 +331,18 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             continue
 
         # --- Continuous filters ---
-        mw = row.get('MW_Mn_g_mol')
         oc = row.get('Organic_Content_pct')
         bet = row.get('BET_Bare_Surface_Area_m2_g')
         pore = row.get('Average_Bare_Pore_Diameter_nm')
         cap = row.get('CO2_Capacity_mmol_g')
-        if pd.isna(mw) or pd.isna(oc) or pd.isna(cap):
+        if pd.isna(oc) or pd.isna(cap):
             continue
         try:
-            mw = float(mw)
             oc = float(oc)
             cap = float(cap)
             bet = float(bet) if not pd.isna(bet) else 0.0
             pore = float(pore) if not pd.isna(pore) else 0.0
         except (ValueError, TypeError):
-            continue
-        if mw < mw_min or mw > mw_max:
             continue
         if oc < oc_min or oc > oc_max:
             continue
@@ -417,7 +410,6 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             'Amine_1_or_Additive_1': amine1,
             'Amine_2_or_Additive_2': amine2,
             'Amine_3_or_Additive_3': amine3,
-            'MW_Mn_g_mol': mw,
             'Organic_Content_pct': oc,
             'BET_Bare_Surface_Area_m2_g': bet,
             'Average_Bare_Pore_Diameter_nm': pore
@@ -493,7 +485,6 @@ def api_init():
             'Amine_1_or_Additive_1': rec.get('Amine_1_or_Additive_1'),
             'Amine_2_or_Additive_2': rec.get('Amine_2_or_Additive_2', 'No'),
             'Amine_3_or_Additive_3': rec.get('Amine_3_or_Additive_3', 'No'),
-            'MW_Mn_g_mol': float(rec.get('MW_Mn_g_mol', 0)),
             'Organic_Content_pct': float(rec.get('Organic_Content_pct', 0)),
             'BET_Bare_Surface_Area_m2_g': float(rec.get('BET_Bare_Surface_Area_m2_g', 0)),
             'Average_Bare_Pore_Diameter_nm': float(rec.get('Average_Bare_Pore_Diameter_nm', 0))
@@ -651,7 +642,7 @@ def api_record_experiment_full():
 
     # Ensure all parameters are present with defaults if missing
     required_params = [
-        'MW_Mn_g_mol', 'Organic_Content_pct', 
+        'Organic_Content_pct',
         'BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm'
     ]
     
@@ -874,76 +865,6 @@ def api_reset_system():
     session.pop('current_session_id', None)
     return jsonify({'success': True, 'message': 'Session reset'})
 
-# ----------------------------------------------------------------------
-# Bulk entry endpoint (experimental_form.html)
-# ----------------------------------------------------------------------
-@app.route('/api/input-custom-experimental-results', methods=['POST'])
-def api_input_custom_experimental_results():
-    sid = get_active_session_id()
-    if not sid:
-        return jsonify({'success': False, 'error': 'No active session'}), 400
-
-    data = request.json
-    experiments = data.get('experiments', [])
-    if not experiments:
-        return jsonify({'success': False, 'error': 'No experiments data'}), 400
-
-    added_count = 0
-    best_capacity = 0.0
-    best_experiment = None
-    for exp in experiments:
-        candidate = {
-            'Support': exp.get('Support'),
-            'Amine_1_or_Additive_1': exp.get('Amine_1_or_Additive_1'),
-            'Amine_2_or_Additive_2': exp.get('Amine_2_or_Additive_2', 'No'),
-            'Amine_3_or_Additive_3': exp.get('Amine_3_or_Additive_3', 'No'),
-            'MW_Mn_g_mol': float(exp.get('MW_Mn_g_mol', 0)),
-            'Organic_Content_pct': float(exp.get('Organic_Content_pct', 0)),
-            'BET_Bare_Surface_Area_m2_g': float(exp.get('BET_Bare_Surface_Area_m2_g', 0)),
-            'Average_Bare_Pore_Diameter_nm': float(exp.get('Average_Bare_Pore_Diameter_nm', 0))
-        }
-        
-        # Ensure all required features are present
-        for feature in FEATURE_ORDER:
-            if feature not in candidate:
-                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
-                    candidate[feature] = 0.0
-                else:
-                    candidate[feature] = 0.0
-        
-        actual_cap = float(exp.get('CO2_Capacity_mmol_g', 0))
-        exp_data = {
-            'session_id': sid,
-            'candidate': candidate,
-            'experimental_performance': actual_cap,
-            'is_historical': False,
-            'predicted_performance': 0.0,
-            'uncertainty': 0.0,
-            'timestamp': datetime.now().isoformat(),
-            'Temperature': float(exp.get('Temperature', 25.0)),
-            'Humidity': float(exp.get('Humidity', 0)),
-            'CO2_Concentration': float(exp.get('CO2_Concentration', 0.04)),
-            'Flow_Rate': float(exp.get('Flow_Rate', 100.0)),
-            'Test_Method': exp.get('Test_Method', 'TGA'),
-            'Notes': exp.get('Notes', '')
-        }
-        db.add_experiment(sid, exp_data)
-        if actual_cap > best_capacity:
-            best_capacity = actual_cap
-            best_experiment = candidate
-        added_count += 1
-
-    # Update session best if improved
-    if best_capacity > 0:
-        sess = db.get_session(sid)
-        current_best = sess.get('best_capacity', 0.0)
-        if best_capacity > current_best:
-            db.update_session(sid, {
-                'best_capacity': best_capacity,
-                'best_experiment': best_experiment
-            })
-
-    return jsonify({'success': True, 'message': f'Added {added_count} experiments'})
 
 # ----------------------------------------------------------------------
 # Database Management Endpoints (unchanged)

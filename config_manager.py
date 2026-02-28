@@ -29,7 +29,7 @@ class ConfigManager:
 
     def _default_config(self):
         return {
-            "numerical_columns": ["MW_Mn_g_mol", "Organic_Content_pct"],
+            "numerical_columns": ["Organic_Content_pct"],
             "categorical_columns": [
                 "Support",
                 "Amine_1_or_Additive_1",
@@ -38,7 +38,6 @@ class ConfigManager:
             ],
             "target_columns": ["CO2_Capacity_mmol_g"],
             "bounds": {
-                "MW_Mn_g_mol": [0, 10000],
                 "Organic_Content_pct": [0, 100]
             },
             "optimization": {

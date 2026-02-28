@@ -1,6 +1,5 @@
 {
   "numerical_columns": [
-    "MW_Mn_g_mol",
     "Organic_Content_pct"
   ],
   "categorical_columns": [
@@ -13,7 +12,6 @@
     "CO2_Capacity_mmol_g"
   ],
   "bounds": {
-    "MW_Mn_g_mol": [0, 20000],
     "Organic_Content_pct": [0, 100]
   },
   "operational_columns": [
