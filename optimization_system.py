@@ -9,20 +9,56 @@ from botorch.optim import optimize_acqf
 from botorch.utils.transforms import unnormalize, normalize
 import gpytorch
 from gpytorch.mlls import ExactMarginalLogLikelihood
-from sklearn.preprocessing import LabelEncoder
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, Tuple
 import warnings
 
 warnings.filterwarnings('ignore')
 
 from encoder import FeatureEncoder
 
-class CatalystBOWithHistory:
+
+class History:
     """
-    Bayesian Optimisation system using BoTorch.
-    Categorical encoding is handled by a FeatureEncoder containing LabelEncoders.
+    Stores the optimisation history: each experiment added is recorded
+    with its actual result and the predictions that were made before it.
     """
 
+    def __init__(self) -> None:
+        self.entries: List[Dict[str, Any]] = []
+
+    def add_entry(self, config: Dict, actual_capacity: float,
+                  predicted_capacity: Optional[float] = None,
+                  uncertainty: Optional[float] = None,
+                  expected_improvement: Optional[float] = None) -> None:
+        """
+        Append one experimental result to the history.
+        """
+        entry = {
+            'iteration': len(self.entries) + 1,
+            'config': config.copy(),
+            'actual_capacity': actual_capacity,
+            'predicted_capacity': predicted_capacity,
+            'uncertainty': uncertainty,
+            'expected_improvement': expected_improvement,
+        }
+        self.entries.append(entry)
+
+    def get_best_so_far(self) -> float:
+        """Return the maximum actual CO₂ capacity seen so far."""
+        if not self.entries:
+            return -float('inf')
+        return max(e['actual_capacity'] for e in self.entries)
+
+    def get_all(self) -> List[Dict]:
+        """Return the complete history list."""
+        return self.entries
+
+
+class DACOptimizer:
+    """
+    Bayesian Optimisation core using BoTorch. Handles surrogate model,
+    acquisition function optimisation, and candidate generation.
+    """
     FEATURE_NAMES = [
         'Support',
         'Amine_1_or_Additive_1',
@@ -33,62 +69,60 @@ class CatalystBOWithHistory:
         'BET_Bare_Surface_Area_m2_g',
         'Average_Bare_Pore_Diameter_nm'
     ]
+    # Indices for categorical / continuous features (0‑based)
+    CATEGORICAL_DIMS = [0, 1, 2, 3]
+    CONTINUOUS_DIMS = [4, 5, 6, 7]
 
     def __init__(self,
-                 target_conditions: Optional[Dict] = None,
-                 categorical_bounds: Optional[Dict] = None,
-                 continuous_bounds: Optional[Dict] = None):
+                 categorical_bounds: Dict[str, List[str]],
+                 continuous_bounds: Dict[str, tuple[float, float]],
+                 target_conditions: Optional[Dict] = None) -> None:
+        """
+        Args:
+            categorical_bounds: Maps each categorical feature name to list of allowed values.
+            continuous_bounds: Maps each continuous feature name to (min, max).
+            target_conditions: Optional target constraints (not used in base BO).
+        """
+        self.encoder = FeatureEncoder(feature_names=self.FEATURE_NAMES)
+        self.categorical_bounds = categorical_bounds
+        self.continuous_bounds = continuous_bounds
         self.target_conditions = target_conditions or {}
-        self.user_categorical_bounds = categorical_bounds or {}
-        self.user_continuous_bounds = continuous_bounds or {}
 
-        # Internal encoder
-        self.feature_names = self.FEATURE_NAMES
-        self.encoder = FeatureEncoder()
-        self.encoder.feature_names = self.FEATURE_NAMES
+        # Training data (tensors)
+        self.train_X = torch.tensor([])  # encoded points
+        self.train_Y = torch.tensor([])  # observed values
 
-        # Training data placeholders
-        self.train_X = torch.tensor([])
-        self.train_Y = torch.tensor([])
+        # Unique category lists (for decoding and bound clamping)
+        self.unique_supports = categorical_bounds.get('Support', ['SBA-15'])
+        self.unique_amines1 = categorical_bounds.get('Amine_1_or_Additive_1', ['No'])
+        self.unique_amines2 = categorical_bounds.get('Amine_2_or_Additive_2', ['No'])
+        self.unique_amines3 = categorical_bounds.get('Amine_3_or_Additive_3', ['No'])
 
-        # Unique values for categorical features
-        self.unique_supports = []
-        self.unique_amines1 = []
-        self.unique_amines2 = []
-        self.unique_amines3 = []
+        # Build optimisation bounds tensor
+        self.bounds = self._init_bounds_tensor()
 
-        # Optimisation bounds (tensor)
-        self.bounds = None
-        self.categorical_dims = [0, 1, 2, 3]
-        self.continuous_dims = [4, 5, 6, 7]
+        # GP Model (initialized as None, will be created when data available)
+        self.gp_model = None
+        self.mll = None
 
-        # History tracking
-        self.optimization_history = []
+        # History tracker
+        self.history = History()
 
-        # If bounds provided, initialise
-        if self.user_categorical_bounds:
-            self._initialize_bounds_and_unique_values()
-            self._fit_encoder_from_bounds()
-
-    def _has_enough_data(self):
-        return self.train_X.numel() > 0 and len(self.train_X) >= 3
-
-    def _initialize_bounds_and_unique_values(self):
-        self.unique_supports = self.user_categorical_bounds.get('Support', ['SBA-15'])
-        self.unique_amines1 = self.user_categorical_bounds.get('Amine_1_or_Additive_1', ['No'])
-        self.unique_amines2 = self.user_categorical_bounds.get('Amine_2_or_Additive_2', ['No'])
-        self.unique_amines3 = self.user_categorical_bounds.get('Amine_3_or_Additive_3', ['No'])
-
+    def _init_bounds_tensor(self) -> torch.Tensor:
+        """Construct a [2 x d] bounds tensor from user-provided bounds."""
+        # Categorical bounds: index range 0 … (n_categories - 1)
         n_supports = len(self.unique_supports)
         n_amines1 = len(self.unique_amines1)
         n_amines2 = len(self.unique_amines2)
         n_amines3 = len(self.unique_amines3)
 
-        mw_min, mw_max = self.user_continuous_bounds.get('MW_Mn_g_mol', (0, 10000))
-        oc_min, oc_max = self.user_continuous_bounds.get('Organic_Content_pct', (0, 100))
-        bet_min, bet_max = self.user_continuous_bounds.get('BET_Bare_Surface_Area_m2_g', (0, 1000))
-        pore_min, pore_max = self.user_continuous_bounds.get('Average_Bare_Pore_Diameter_nm', (0, 20))
+        # Continuous bounds with safe fallback
+        mw_min, mw_max = self.continuous_bounds.get('MW_Mn_g_mol', (0, 10000))
+        oc_min, oc_max = self.continuous_bounds.get('Organic_Content_pct', (0, 100))
+        bet_min, bet_max = self.continuous_bounds.get('BET_Bare_Surface_Area_m2_g', (0, 1000))
+        pore_min, pore_max = self.continuous_bounds.get('Average_Bare_Pore_Diameter_nm', (0, 20))
 
+        # Avoid zero‑range bounds
         if mw_max <= mw_min:
             mw_max = mw_min + 1000
         if oc_max <= oc_min:
@@ -98,129 +132,27 @@ class CatalystBOWithHistory:
         if pore_max <= pore_min:
             pore_max = pore_min + 5
 
-        self.bounds = torch.tensor([
-            [0.0, 0.0, 0.0, 0.0, mw_min, oc_min, bet_min, pore_min],
-            [max(0.0, n_supports - 1.0),
-             max(0.0, n_amines1 - 1.0),
-             max(0.0, n_amines2 - 1.0),
-             max(0.0, n_amines3 - 1.0),
-             mw_max, oc_max, bet_max, pore_max]
+        lower = torch.tensor([
+            0.0, 0.0, 0.0, 0.0,
+            mw_min, oc_min, bet_min, pore_min
         ], dtype=torch.float32)
+        upper = torch.tensor([
+            max(0.0, n_supports - 1.0),
+            max(0.0, n_amines1 - 1.0),
+            max(0.0, n_amines2 - 1.0),
+            max(0.0, n_amines3 - 1.0),
+            mw_max, oc_max, bet_max, pore_max
+        ], dtype=torch.float32)
+        return torch.stack([lower, upper])
 
-    def _fit_encoder_from_bounds(self):
-        all_categories = {
-            'Support': self.unique_supports,
-            'Amine_1_or_Additive_1': self.unique_amines1,
-            'Amine_2_or_Additive_2': self.unique_amines2,
-            'Amine_3_or_Additive_3': self.unique_amines3
-        }
-        for col, cats in all_categories.items():
-            le = LabelEncoder()
-            le.fit(cats)
-            self.encoder.label_encoders[col] = le
-        self.encoder.feature_names = self.FEATURE_NAMES
-
-    def generate_new_candidates(self, n_candidates: int = 5) -> List[Dict]:
-        if self.bounds is None:
-            raise RuntimeError("Bounds not initialised. Provide categorical_bounds and continuous_bounds.")
-
-        if not self._has_enough_data():
-            candidates_raw = self._generate_random_candidates(n_candidates * 2)
-        else:
-            # Check if training data dimensions match bounds dimensions
-            if self.train_X.shape[1] != self.bounds.shape[1]:
-                # Dimension mismatch - fall back to random candidates
-                # This can happen if the training data was created with different features
-                print(f"Dimension mismatch: train_X has {self.train_X.shape[1]} features, bounds expect {self.bounds.shape[1]}")
-                candidates_raw = self._generate_random_candidates(n_candidates * 2)
-            else:
-                # Attempt BoTorch optimisation
-                train_X_norm = normalize(self.train_X, self.bounds)
-                train_Y = self.train_Y if self.train_Y.dim() == 2 else self.train_Y.unsqueeze(-1)
-
-                gp = SingleTaskGP(
-                    train_X_norm,
-                    train_Y,
-                    outcome_transform=Standardize(m=1)
-                )
-                mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
-                fit_gpytorch_mll(mll)
-
-                best_f = self.train_Y.max().item()
-                qEI = qExpectedImprovement(model=gp, best_f=best_f)
-
-                # Create normalized bounds based on the actual number of features
-                num_features = self.bounds.shape[1] if self.bounds is not None else 6
-                norm_bounds = torch.tensor([[0.0]*num_features, [1.0]*num_features], dtype=torch.float32)
-                candidates_norm, _ = optimize_acqf(
-                    acq_function=qEI,
-                    bounds=norm_bounds,
-                    q=n_candidates * 2,
-                    num_restarts=10,
-                    raw_samples=1000,
-                    options={"maxiter": 100}
-                )
-                candidates_raw = unnormalize(candidates_norm, self.bounds)
-                candidates_raw = self._round_categorical(candidates_raw)
-
-        all_configs = []
-        for i in range(min(len(candidates_raw), n_candidates * 2)):
-            config = self._decode_configuration(candidates_raw[i])
-
-            # Calculate prediction even for random candidates
-            pred_mean, pred_std, ei = self._predict_and_ei(candidates_raw[i:i+1])
-
-            # Ensure we have valid prediction values even when there's insufficient data
-            if not self._has_enough_data():
-                # When there's not enough data, use a reasonable estimate based on existing data
-                if self.train_Y.numel() > 0:
-                    pred_mean = self.train_Y.mean().item()  # Use average of existing Y values
-                    pred_std = max(self.train_Y.std().item(), 0.1)  # Use standard deviation of existing Y values
-                    ei = 0.0  # No expected improvement without a proper model
-                else:
-                    pred_mean = 0.0  # Default value if no training data
-                    pred_std = 1.0  # Default uncertainty
-                    ei = 0.0
-
-            config['Predicted_CO2_Capacity_mmol_g'] = float(pred_mean)
-            config['Uncertainty'] = float(pred_std)
-            config['Expected_Improvement'] = float(ei)
-            all_configs.append(config)
-
-        all_configs.sort(key=lambda x: x['Expected_Improvement'], reverse=True)
-        return all_configs[:n_candidates]
-
-    def _predict_and_ei(self, X_tensor):
-        if not self._has_enough_data():
-            return 0.0, 1.0, 0.0
-        X_norm = normalize(X_tensor, self.bounds)
-        train_X_norm = normalize(self.train_X, self.bounds)
-        train_Y = self.train_Y if self.train_Y.dim() == 2 else self.train_Y.unsqueeze(-1)
-
-        gp = SingleTaskGP(train_X_norm, train_Y, outcome_transform=Standardize(m=1))
-        mll = ExactMarginalLogLikelihood(gp.likelihood, gp)
-        fit_gpytorch_mll(mll)
-
-        with torch.no_grad(), gpytorch.settings.fast_pred_var():
-            posterior = gp.posterior(X_norm)
-            mean = posterior.mean.squeeze().item()
-            variance = posterior.variance.squeeze().item()
-            std = math.sqrt(max(variance, 1e-9))  # Ensure std is not too small or negative due to numerical issues
-            best_f = self.train_Y.max().item()
-            ei = max(0.0, mean - best_f)
-        return mean, std, ei
-
-    def _generate_random_candidates(self, n: int) -> torch.Tensor:
-        if self.bounds is None:
-            raise RuntimeError("Bounds not set; cannot generate random candidates.")
-        num_features = self.bounds.shape[1]  # Get the number of features from bounds
-        rand = torch.rand(n, num_features, dtype=torch.float32)
-        candidates = rand * (self.bounds[1] - self.bounds[0]) + self.bounds[0]
-        return self._round_categorical(candidates)
+    def _has_enough_data(self, min_points: int = 3) -> bool:
+        """Check if we have at least `min_points` observations."""
+        return len(self.train_X) >= min_points
 
     def _round_categorical(self, X: torch.Tensor) -> torch.Tensor:
+        """Round and clamp categorical dimensions to valid integer indices."""
         X_rounded = X.clone()
-        for dim in self.categorical_dims:
+        for dim in self.CATEGORICAL_DIMS:
             X_rounded[..., dim] = torch.round(X_rounded[..., dim])
             X_rounded[..., dim] = torch.clamp(
                 X_rounded[..., dim],
@@ -229,14 +161,18 @@ class CatalystBOWithHistory:
             )
         return X_rounded
 
-    def _decode_configuration(self, X: torch.Tensor) -> Dict:
+    def _decode_config(self, X: torch.Tensor) -> Dict[str, Any]:
+        """
+        Convert a single encoded point (1‑D tensor) into a configuration dict.
+        Assumes X is already within bounds.
+        """
         if X.dim() == 2:
             X = X.squeeze(0)
 
-        support_idx = int(torch.clamp(torch.round(X[0]), 0, len(self.unique_supports)-1).item())
-        amine1_idx = int(torch.clamp(torch.round(X[1]), 0, len(self.unique_amines1)-1).item())
-        amine2_idx = int(torch.clamp(torch.round(X[2]), 0, len(self.unique_amines2)-1).item())
-        amine3_idx = int(torch.clamp(torch.round(X[3]), 0, len(self.unique_amines3)-1).item())
+        support_idx = int(torch.clamp(torch.round(X[0]), 0, len(self.unique_supports) - 1).item())
+        amine1_idx = int(torch.clamp(torch.round(X[1]), 0, len(self.unique_amines1) - 1).item())
+        amine2_idx = int(torch.clamp(torch.round(X[2]), 0, len(self.unique_amines2) - 1).item())
+        amine3_idx = int(torch.clamp(torch.round(X[3]), 0, len(self.unique_amines3) - 1).item())
 
         config = {
             'Support': self.unique_supports[support_idx],
@@ -248,40 +184,221 @@ class CatalystBOWithHistory:
             'BET_Bare_Surface_Area_m2_g': float(X[6].item()),
             'Average_Bare_Pore_Diameter_nm': float(X[7].item())
         }
-        config['MW_Mn_g_mol'] = max(self.bounds[0,4].item(),
-                                    min(self.bounds[1,4].item(), config['MW_Mn_g_mol']))
-        config['Organic_Content_pct'] = max(self.bounds[0,5].item(),
-                                            min(self.bounds[1,5].item(), config['Organic_Content_pct']))
-        config['BET_Bare_Surface_Area_m2_g'] = max(self.bounds[0,6].item(),
-                                                   min(self.bounds[1,6].item(), config['BET_Bare_Surface_Area_m2_g']))
-        config['Average_Bare_Pore_Diameter_nm'] = max(self.bounds[0,7].item(),
-                                                      min(self.bounds[1,7].item(), config['Average_Bare_Pore_Diameter_nm']))
+        # Clamp continuous values to bounds (already done by generation, but safe)
+        config['MW_Mn_g_mol'] = max(self.bounds[0, 4].item(),
+                                    min(self.bounds[1, 4].item(), config['MW_Mn_g_mol']))
+        config['Organic_Content_pct'] = max(self.bounds[0, 5].item(),
+                                            min(self.bounds[1, 5].item(), config['Organic_Content_pct']))
+        config['BET_Bare_Surface_Area_m2_g'] = max(self.bounds[0, 6].item(),
+                                                   min(self.bounds[1, 6].item(), config['BET_Bare_Surface_Area_m2_g']))
+        config['Average_Bare_Pore_Diameter_nm'] = max(self.bounds[0, 7].item(),
+                                                      min(self.bounds[1, 7].item(),
+                                                          config['Average_Bare_Pore_Diameter_nm']))
+        # Round continuous values for readability
         config['Organic_Content_pct'] = round(config['Organic_Content_pct'], 1)
         config['BET_Bare_Surface_Area_m2_g'] = round(config['BET_Bare_Surface_Area_m2_g'], 2)
         config['Average_Bare_Pore_Diameter_nm'] = round(config['Average_Bare_Pore_Diameter_nm'], 2)
         return config
 
-    def add_experimental_result(self, config: Dict, actual_capacity: float,
-                                original_uncertainty=None,
-                                original_expected_improvement=None,
-                                original_predicted_capacity=None):
-        encoded = self.encoder.encode_candidate(config, feature_order=self.FEATURE_NAMES)
-        if encoded is not None:
-            new_X = torch.tensor(encoded, dtype=torch.float32).unsqueeze(0)
-            new_y = torch.tensor([[actual_capacity]], dtype=torch.float32)
-            if self.train_X.numel() == 0:
-                self.train_X = new_X
-                self.train_Y = new_y
-            else:
-                self.train_X = torch.cat([self.train_X, new_X], dim=0)
-                self.train_Y = torch.cat([self.train_Y, new_y], dim=0)
-            self.optimization_history.append({
-                'iteration': len(self.optimization_history) + 1,
-                'actual_capacity': actual_capacity,
-                'predicted_capacity': original_predicted_capacity or actual_capacity,
-                'uncertainty': original_uncertainty or 0.0,
-                'current_best': self.train_Y.max().item()
-            })
+    def _random_candidates(self, n: int) -> torch.Tensor:
+        """Generate `n` random points uniformly in the bounds."""
+        rand = torch.rand(n, self.bounds.shape[1], dtype=torch.float32)
+        candidates = rand * (self.bounds[1] - self.bounds[0]) + self.bounds[0]
+        return self._round_categorical(candidates)
 
-    def get_optimization_history(self) -> List[Dict]:
-        return self.optimization_history
+    def fit_gp(self) -> None:
+        """
+        Fit Gaussian Process model on current training data.
+        Updates self.gp_model and self.mll.
+        """
+        if not self._has_enough_data():
+            self.gp_model = None
+            self.mll = None
+            return
+
+        # Normalise training data
+        train_X_norm = normalize(self.train_X, self.bounds)
+        train_Y = self.train_Y if self.train_Y.dim() == 2 else self.train_Y.unsqueeze(-1)
+
+        # Create and fit GP
+        self.gp_model = SingleTaskGP(
+            train_X_norm,
+            train_Y,
+            outcome_transform=Standardize(m=1)
+        )
+        self.mll = ExactMarginalLogLikelihood(self.gp_model.likelihood, self.gp_model)
+        fit_gpytorch_mll(self.mll)
+
+    def compute_prediction(self, X_candidate: torch.Tensor) -> Tuple[float, float]:
+        """
+        Compute mean and standard deviation prediction for a candidate point.
+        Uses the current GP model if available, otherwise falls back to data statistics.
+
+        Args:
+            X_candidate: Tensor of shape (1, d) or (d,)
+
+        Returns:
+            Tuple of (mean, std)
+        """
+        if X_candidate.dim() == 1:
+            X_candidate = X_candidate.unsqueeze(0)
+
+        if self.gp_model is None or not self._has_enough_data():
+            # Fallback: use data mean / std if available
+            if len(self.train_Y) > 0:
+                mean = self.train_Y.mean().item()
+                std = max(self.train_Y.std().item(), 0.1)
+            else:
+                mean = 0.0
+                std = 1.0
+            return mean, std
+
+        # Normalise candidate
+        X_norm = normalize(X_candidate, self.bounds)
+
+        with torch.no_grad(), gpytorch.settings.fast_pred_var():
+            posterior = self.gp_model.posterior(X_norm)
+            mean = posterior.mean.squeeze().item()
+            variance = posterior.variance.squeeze().item()
+            std = math.sqrt(max(variance, 1e-9))
+
+        return mean, std
+
+    def compute_ei(self, X_candidate: torch.Tensor) -> float:
+        """
+        Compute Expected Improvement for a candidate point.
+
+        Args:
+            X_candidate: Tensor of shape (1, d) or (d,)
+
+        Returns:
+            EI value
+        """
+        if X_candidate.dim() == 1:
+            X_candidate = X_candidate.unsqueeze(0)
+
+        if self.gp_model is None or not self._has_enough_data():
+            return 0.0
+
+        mean, std = self.compute_prediction(X_candidate)
+        best_f = self.train_Y.max().item()
+        ei = max(0.0, mean - best_f)  # simple EI (no exploration term)
+
+        return ei
+
+    def generate_candidates(self, n_candidates: int = 5) -> List[Dict[str, Any]]:
+        """
+        Propose the next `n_candidates` experiments.
+
+        Uses BoTorch's qExpectedImprovement when enough data is available,
+        otherwise falls back to random sampling.
+        """
+        if self.bounds is None:
+            raise RuntimeError("Bounds not initialised.")
+
+        # Stage 1: generate raw candidates (twice as many for later filtering)
+        if not self._has_enough_data() or self.gp_model is None:
+            candidates_raw = self._random_candidates(n_candidates * 2)
+        else:
+            # Ensure training data dimension matches bounds
+            if self.train_X.shape[1] != self.bounds.shape[1]:
+                print(
+                    f"Warning: train_X dim {self.train_X.shape[1]} != bounds dim {self.bounds.shape[1]}. Falling back to random.")
+                candidates_raw = self._random_candidates(n_candidates * 2)
+            else:
+                # Use the fitted GP model
+                best_f = self.train_Y.max().item()
+                qEI = qExpectedImprovement(model=self.gp_model, best_f=best_f)
+
+                # Normalised bounds [0,1]^d
+                norm_bounds = torch.tensor([[0.0] * self.bounds.shape[1],
+                                            [1.0] * self.bounds.shape[1]], dtype=torch.float32)
+
+                candidates_norm, _ = optimize_acqf(
+                    acq_function=qEI,
+                    bounds=norm_bounds,
+                    q=n_candidates * 2,  # generate twice as many
+                    num_restarts=10,
+                    raw_samples=1000,
+                    options={"maxiter": 100}
+                )
+                candidates_raw = unnormalize(candidates_norm, self.bounds)
+                candidates_raw = self._round_categorical(candidates_raw)
+
+        # Stage 2: decode, compute predictions, rank by EI
+        all_configs = []
+        for i in range(min(len(candidates_raw), n_candidates * 2)):
+            config = self._decode_config(candidates_raw[i])
+
+            # Use compute_prediction method
+            mean, std = self.compute_prediction(candidates_raw[i:i + 1])
+            ei = self.compute_ei(candidates_raw[i:i + 1])
+
+            config['Predicted_CO2_Capacity_mmol_g'] = mean
+            config['Uncertainty'] = std
+            config['Expected_Improvement'] = ei
+            all_configs.append(config)
+
+        # Sort by EI descending and return top n_candidates
+        all_configs.sort(key=lambda x: x['Expected_Improvement'], reverse=True)
+        return all_configs[:n_candidates]
+
+    def add_experiment(self, result_data: Dict[str, Any]) -> None:
+        """
+        Incorporate a new experimental result into the optimiser.
+
+        The method automatically computes predicted capacity, uncertainty, and
+        expected improvement based on the current model (before adding new point),
+        then updates the model with the new observation and refits the GP.
+
+        Args:
+            result_data: Dictionary with keys:
+                - All feature names from FEATURE_NAMES (required)
+                - 'actual_capacity' (required)
+        """
+        # Extract required fields
+        if 'actual_capacity' not in result_data:
+            raise ValueError("result_data must contain 'actual_capacity'")
+        actual = result_data['actual_capacity']
+
+        # Build configuration dict (features only)
+        config = {name: result_data[name] for name in self.FEATURE_NAMES if name in result_data}
+        if len(config) != len(self.FEATURE_NAMES):
+            missing = set(self.FEATURE_NAMES) - set(config.keys())
+            raise ValueError(f"Missing feature keys: {missing}")
+
+        # Encode the configuration
+        encoded = self.encoder.encode_candidate(config, feature_order=self.FEATURE_NAMES)
+        if encoded is None:
+            raise ValueError("FeatureEncoder failed to encode the configuration.")
+
+        X_new = torch.tensor(encoded, dtype=torch.float32).unsqueeze(0)  # shape (1, d)
+
+        # --- Compute predictions using current model (before adding new point) ---
+        pred_mean, pred_std = self.compute_prediction(X_new)
+        ei = self.compute_ei(X_new)
+
+        # --- Update training data ---
+        y_new = torch.tensor([[actual]], dtype=torch.float32)
+        if self.train_X.numel() == 0:
+            self.train_X = X_new
+            self.train_Y = y_new
+        else:
+            self.train_X = torch.cat([self.train_X, X_new], dim=0)
+            self.train_Y = torch.cat([self.train_Y, y_new], dim=0)
+
+        # --- Refit GP with updated data ---
+        self.fit_gp()
+
+        # --- Record in history with computed metadata ---
+        self.history.add_entry(
+            config=config,
+            actual_capacity=actual,
+            predicted_capacity=pred_mean,
+            uncertainty=pred_std,
+            expected_improvement=ei
+        )
+
+    def get_history(self) -> History:
+        """Return the history object."""
+        return self.history
