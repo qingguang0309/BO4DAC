@@ -340,7 +340,7 @@ class DACOptimizer:
             all_configs.append(config)
 
         # Sort by EI descending and return top n_candidates
-        all_configs.sort(key=lambda x: x['Expected_Improvement'], reverse=True)
+        all_configs.sort(key=lambda x: x['Predicted_CO2_Capacity_mmol_g'], reverse=True)
         return all_configs[:n_candidates]
 
     def add_experiment(self, result_data: Dict[str, Any]) -> None:

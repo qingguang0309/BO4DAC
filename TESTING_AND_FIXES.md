@@ -32,7 +32,7 @@
   - Initialization of HistoricalDataProcessor
   - Data preprocessing with filtering
   - Configuration encoding
-- **TestCatalystBOWithHistory**: Tests for Bayesian optimization system
+- **TestDACOptimizer**: Tests for Bayesian optimization system (updated from CatalystBOWithHistory to DACOptimizer)
   - Initialization with historical data
   - Configuration encoding and decoding
   - Adding experimental results

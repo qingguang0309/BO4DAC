@@ -17,7 +17,7 @@ from config_manager import ConfigManager
 from encoder import FeatureEncoder
 
 # --- BoTorch Optimisation System ---
-from optimization_system import CatalystBOWithHistory
+from optimization_system import DACOptimizer
 
 # --- Visualisation (matplotlib only) ---
 import matplotlib
@@ -50,9 +50,9 @@ FEATURE_ORDER = [
 # Path to the master historical experiments file
 HISTORICAL_CSV_PATH = 'data/historical_experiments.csv'
 
-# Cache for BO systems to avoid recreating them unnecessarily
-bo_system_cache = {}
-cache_lock = Lock()
+# Session-based BO system manager
+# Each session has one BO system that gets updated with new data
+session_bo_systems = {}
 
 # ----------------------------------------------------------------------
 # Global Services
@@ -94,8 +94,13 @@ def get_active_session_id():
 
 def create_bo_system(session_id):
     """
-    Recreate a CatalystBOWithHistory instance from the data stored in DB.
+    Get or create the BO system for a session.
+    Each session has one BO system that gets initialized once and updated with new experimental data.
     """
+    # Check if we already have a BO system for this session
+    if session_id in session_bo_systems:
+        return session_bo_systems[session_id]
+        
     sess = db.get_session(session_id)
     if not sess:
         raise ValueError(f"Session {session_id} not found")
@@ -158,20 +163,14 @@ def create_bo_system(session_id):
         "Average_Bare_Pore_Diameter_nm": (float(pore_range[0]), float(pore_range[1]))
     }
 
-    bo = CatalystBOWithHistory(
-        target_conditions=conditions,
+    bo = DACOptimizer(
         categorical_bounds=categorical_bounds,
-        continuous_bounds=continuous_bounds
+        continuous_bounds=continuous_bounds,
+        target_conditions=conditions
     )
-    bo.feature_names = FEATURE_ORDER
-    bo.encoder.feature_names = FEATURE_ORDER
-    bo._initialize_bounds_and_unique_values()
-    bo._fit_encoder_from_bounds()
 
     exps = db.get_experiments_by_session(session_id)
     if not exps:
-        bo.train_X = torch.tensor([])
-        bo.train_Y = torch.tensor([])
         return bo
 
     X_list = []
@@ -207,9 +206,13 @@ def create_bo_system(session_id):
     if X_list:
         bo.train_X = torch.stack(X_list)  # Use torch.stack instead of np.array for consistency
         bo.train_Y = torch.tensor(np.array(y_list), dtype=torch.float32).unsqueeze(-1)
-    else:
-        bo.train_X = torch.tensor([], dtype=torch.float32).reshape(0, len(FEATURE_ORDER))  # Proper empty tensor
-        bo.train_Y = torch.tensor([], dtype=torch.float32).reshape(0, 1)
+        # Fit the GP model with the historical data
+        bo.fit_gp()
+        app.logger.info(f"Fit records f{len(y_list)})")
+
+
+    # Store the newly created BO system in the session cache
+    session_bo_systems[session_id] = bo
 
     return bo
 
@@ -460,7 +463,7 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
                 'best_experiment': best_exp
             })
 
-    print(f"Added {len(df)} rows from historical CSV, {best_cap} best capacity")
+    print(f"Added rows from historical CSV, {best_cap} best capacity")
 
 # ----------------------------------------------------------------------
 # API Endpoints – 4‑Step Optimisation Flow
@@ -523,6 +526,7 @@ def api_init():
 
     # 3. Update session best based on all records now in DB
     experiments = db.get_experiments_by_session(session_id)
+    app.logger.info(f"found {len(experiments)} experiments for session {session_id}")
     best_cap = 0.0
     best_exp = None
     for exp in experiments:
@@ -555,7 +559,7 @@ def api_generate_candidates():
 
     n_candidates = request.json.get('n_candidates', 5)
     bo = create_bo_system(sid)
-    candidates = bo.generate_new_candidates(n_candidates)
+    candidates = bo.generate_candidates(n_candidates)
 
     session_data = db.get_session(sid)
     session_data['current_candidates'] = candidates
@@ -608,8 +612,16 @@ def api_record_experiment():
         })
         best_cap = actual_capacity
 
-    # Update BO system with new data point
-    bo = create_bo_system(sid)
+    # Update the existing BO system with the new experimental result
+    bo = create_bo_system(sid)  # This will get the existing BO system or create a new one
+    bo.add_experiment({
+        **candidate,
+        'actual_capacity': actual_capacity
+    })
+    
+    # Update the stored BO system in the session cache
+    session_bo_systems[sid] = bo
+    
     total_data_points = bo.train_X.shape[0] if bo.train_X.ndim > 0 else 0
     real_exps = [e for e in db.get_experiments_by_session(sid) if not e.get('is_historical', False)]
 
@@ -650,22 +662,18 @@ def api_record_experiment_full():
     # Get the original predicted capacity from the data or from the candidate if it's available
     original_predicted_capacity = data.get('original_predicted_capacity', candidate.get('Predicted_CO2_Capacity_mmol_g', 0.0))
 
-    # Update BO system with new data point before storing the experiment
-    bo = create_bo_system(sid)
-    bo.add_experimental_result(candidate, actual_capacity)
-    app.logger.info(candidate)
-    # Recalculate uncertainty for this experiment using the updated model
-    # This ensures the uncertainty reflects the model state after including this data point
-    # Need to encode the candidate properly for the prediction function
-    encoded_candidate = bo.encoder.encode_candidate(candidate, feature_order=bo.FEATURE_NAMES)
-    # if encoded_candidate is not None:
-    #     candidate_tensor = torch.tensor(encoded_candidate, dtype=torch.float32).unsqueeze(0)
-    #     pred_mean, pred_std, ei = bo._predict_and_ei_raw(candidate_tensor)
-    #     recalculated_uncertainty = float(pred_std) if pred_std is not None else 0.0
-    # else:
-    #     # Fallback if encoding fails
-    recalculated_uncertainty = candidate.get('Uncertainty', 0.0)
+    # Update the existing BO system with the new experimental result
+    bo = create_bo_system(sid)  # This will get the existing BO system or create a new one
+    bo.add_experiment({
+        **candidate,
+        'actual_capacity': actual_capacity
+    })
     
+    # Update the stored BO system in the session cache
+    session_bo_systems[sid] = bo
+
+    recalculated_uncertainty = candidate.get('Uncertainty', 0.0)
+
     exp_data = {
         'session_id': sid,
         'candidate': candidate,
