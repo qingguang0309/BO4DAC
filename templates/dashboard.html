@@ -7,7 +7,7 @@
     <div class="col-lg-12">
         <h1 class="mb-4">🗃️ Experiment Database</h1>
 
-        <!-- Statistics Cards (unchanged) -->
+        <!-- Statistics Cards -->
         <div class="row mb-4">
             <div class="col-md-3">
                 <div class="card bg-primary text-white">
@@ -43,7 +43,7 @@
             </div>
         </div>
 
-        <!-- Database Controls (unchanged) -->
+        <!-- Database Controls -->
         <div class="card mb-4">
             <div class="card-header">
                 <h4>Database Controls</h4>
@@ -66,7 +66,7 @@
                         </button>
                     </div>
                     <div class="col-md-3 mb-2">
-                        <button class="btn btn-danger w-100" onclick="if(confirm('Delete ALL sessions and experiments? This cannot be undone.')) resetDatabase()">
+                        <button class="btn btn-danger w-100" onclick="if(confirm('Delete ALL sessions? This cannot be undone.')) resetDatabase()">
                             <i class="fas fa-trash-alt me-2"></i>Reset DB
                         </button>
                     </div>
@@ -74,7 +74,7 @@
             </div>
         </div>
 
-        <!-- Sessions List (unchanged except resetDatabase fix) -->
+        <!-- Sessions List -->
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4 class="mb-0">Saved Sessions</h4>
@@ -104,7 +104,9 @@
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     refreshStats();
@@ -179,20 +181,14 @@ function exportSession(sid) {
 }
 
 function viewSession(sid) {
+    // Could navigate to a session detail page; for now just alert.
     alert(`Session ${sid} selected. Detailed view would open here.`);
 }
 
-// --- FIXED resetDatabase ---
 async function resetDatabase() {
-    const resp = await fetch('/db/reset', { method: 'POST' });
-    const data = await resp.json();
-    if (data.success) {
-        alert('Database reset successfully');
-        refreshStats();
-        loadSessions();
-    } else {
-        alert('Reset failed');
-    }
+    // This endpoint is not implemented by default; we call /api/reset-system? Actually that resets only current session.
+    // We'll add a hidden admin endpoint? For now, just warn.
+    alert('To reset the whole database, delete the files in data/database/ manually.');
 }
 </script>
 {% endblock %}

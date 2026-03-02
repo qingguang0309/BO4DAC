@@ -39,9 +39,16 @@ class ExperimentDatabase:
             json.dump(data, f, indent=2, ensure_ascii=False, default=self._json_serializer)
 
     def _json_serializer(self, obj):
+        # Handle NaN, Infinity, -Infinity
+        if isinstance(obj, float):
+            if np.isnan(obj) or np.isinf(obj):
+                return None  # Convert NaN/Inf to null
         if isinstance(obj, (np.integer, np.int32, np.int64)):
             return int(obj)
         elif isinstance(obj, (np.floating, np.float32, np.float64)):
+            # Check for NaN/Inf again for numpy floats
+            if np.isnan(obj) or np.isinf(obj):
+                return None
             return float(obj)
         elif isinstance(obj, np.ndarray):
             return obj.tolist()

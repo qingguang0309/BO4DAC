@@ -587,7 +587,7 @@
                 <div class="card-header"><i class="fas fa-cog me-2"></i>Actions</div>
                 <div class="card-body">
                     <button class="btn btn-outline-secondary w-100 mb-2" onclick="exportData()">
-                        <i class="fas fa-download me-2"></i>Export Data
+                        <i class="fas fa-download me-2"></i>Export Data (CSV)
                     </button>
                     <button class="btn btn-outline-danger w-100" onclick="restartSetup()">
                         <i class="fas fa-redo-alt me-2"></i>Restart Setup
@@ -1889,9 +1889,25 @@ function recordExperiment() {
 }
 
 async function exportData() {
-    window.open('/db/export/json', '_blank');
+    const sid = await getCurrentSessionId();
+    if (!sid) {
+        showNotification('No active session to export', 'warning');
+        return;
+    }
+    window.open(`/db/export/csv?session_id=${sid}`, '_blank');
 }
-
+async function getCurrentSessionId() {
+    try {
+        const resp = await fetch('/api/get-status');
+        const data = await resp.json();
+        if (data.success) {
+            return data.session_id;
+        }
+    } catch (e) {
+        console.error('Error getting session ID:', e);
+    }
+    return null;
+}
 async function restartSetup() {
     if (confirm('Restart the 4‑step process? This will reset the current session.')) {
         showLoading();
@@ -2009,6 +2025,53 @@ document.addEventListener('DOMContentLoaded', function() {
         r.addEventListener('change', updateStep2Summary);
     });
     updateStep2Summary();
+
+    // Check URL parameters for direct navigation to step 4
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionParam = urlParams.get('session');
+    const stepParam = urlParams.get('step');
+
+    if (sessionParam) {
+        // Show loading while setting up the session
+        showLoading();
+
+        // Set the session ID in the Flask session
+        fetch('/api/set-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionParam })
+        })
+        .then(resp => resp.json())
+        .then(data => {
+            if (data.success) {
+                // Load the session data into the UI
+                return loadSystemStatus().then(() => {
+                    // If step is specified, go to that step
+                    if (stepParam) {
+                        goToStep(parseInt(stepParam));
+                        if (parseInt(stepParam) === 4) {
+                            // Already loaded via loadSystemStatus()
+                            updateOptimizationChart();
+                        }
+                    } else {
+                        goToStep(4); // Default to step 4
+                        updateOptimizationChart();
+                    }
+                });
+            } else {
+                showNotification('Failed to load session: ' + (data.error || 'Unknown error'), 'error');
+                goToStep(1);
+            }
+        })
+        .catch(err => {
+            console.error('Error setting session:', err);
+            showNotification('Error loading session', 'error');
+            goToStep(1);
+        })
+        .finally(() => {
+            hideLoading();
+        });
+    }
 });
 </script>
 {% endblock %}

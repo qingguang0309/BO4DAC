@@ -67,6 +67,9 @@ def numpy_to_python(obj):
     if isinstance(obj, (np.integer, np.int32, np.int64)):
         return int(obj)
     elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        # Check for NaN/Inf
+        if np.isnan(obj) or np.isinf(obj):
+            return None
         return float(obj)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
@@ -98,7 +101,7 @@ def create_bo_system(session_id):
     # Check if we already have a BO system for this session
     if session_id in session_bo_systems:
         return session_bo_systems[session_id]
-        
+
     sess = db.get_session(session_id)
     if not sess:
         raise ValueError(f"Session {session_id} not found")
@@ -114,28 +117,28 @@ def create_bo_system(session_id):
 
     mw_range = search_bounds.get('mwRange', [0, 10000])
     oc_range = search_bounds.get('ocRange', [0, 100])
-    
+
     # Determine BET and Pore ranges based on support-specific ranges
     support_specific_ranges = search_bounds.get('supportSpecificRanges', {})
     supports_selected = search_bounds.get('supports', [])
-    
+
     # Calculate overall ranges based on selected supports
     if supports_selected and support_specific_ranges:
         overall_min_bet = float('inf')
         overall_max_bet = float('-inf')
         overall_min_pore = float('inf')
         overall_max_pore = float('-inf')
-        
+
         for support in supports_selected:
             if support in support_specific_ranges:
                 bet_range = support_specific_ranges[support].get('betRange', [0, 1000])
                 pore_range = support_specific_ranges[support].get('poreRange', [0, 20])
-                
+
                 overall_min_bet = min(overall_min_bet, bet_range[0])
                 overall_max_bet = max(overall_max_bet, bet_range[1])
                 overall_min_pore = min(overall_min_pore, pore_range[0])
                 overall_max_pore = max(overall_max_pore, pore_range[1])
-        
+
         # If no specific ranges were found, use default values
         if overall_min_bet == float('inf'):
             overall_min_bet = 0
@@ -145,14 +148,14 @@ def create_bo_system(session_id):
             overall_min_pore = 0
         if overall_max_pore == float('-inf'):
             overall_max_pore = 20
-            
+
         bet_range = [overall_min_bet, overall_max_bet]
         pore_range = [overall_min_pore, overall_max_pore]
     else:
         # Default ranges if no support-specific ranges are defined
         bet_range = [0, 1000]
         pore_range = [0, 20]
-    
+
     continuous_bounds = {
         "Organic_Content_pct": (float(oc_range[0]), float(oc_range[1])),
         "BET_Bare_Surface_Area_m2_g": (float(bet_range[0]), float(bet_range[1])),
@@ -190,7 +193,7 @@ def create_bo_system(session_id):
                         config[feature] = (pore_range[0] + pore_range[1]) / 2
                 else:
                     config[feature] = config.get(feature, 0)  # Default for other parameters
-        
+
         encoded = bo.encoder.encode_candidate(config, feature_order=FEATURE_ORDER)
         if encoded is not None:
             # Ensure encoded vector has the correct length
@@ -260,24 +263,24 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
     # Determine BET and Pore ranges based on support-specific ranges for filtering
     support_specific_ranges = search_bounds.get('supportSpecificRanges', {})
     supports_selected = search_bounds.get('supports', [])
-    
+
     # Calculate overall ranges based on selected supports
     if supports_selected and support_specific_ranges:
         overall_min_bet = float('inf')
         overall_max_bet = float('-inf')
         overall_min_pore = float('inf')
         overall_max_pore = float('-inf')
-        
+
         for support in supports_selected:
             if support in support_specific_ranges:
                 bet_range = support_specific_ranges[support].get('betRange', [0, 1000])
                 pore_range = support_specific_ranges[support].get('poreRange', [0, 20])
-                
+
                 overall_min_bet = min(overall_min_bet, bet_range[0])
                 overall_max_bet = max(overall_max_bet, bet_range[1])
                 overall_min_pore = min(overall_min_pore, pore_range[0])
                 overall_max_pore = max(overall_max_pore, pore_range[1])
-        
+
         # If no specific ranges were found, use default values
         if overall_min_bet == float('inf'):
             overall_min_bet = 0
@@ -287,7 +290,7 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             overall_min_pore = 0
         if overall_max_pore == float('-inf'):
             overall_max_pore = 20
-            
+
         bet_min, bet_max = overall_min_bet, overall_max_bet
         pore_min, pore_max = overall_min_pore, overall_max_pore
     else:
@@ -404,7 +407,7 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             'BET_Bare_Surface_Area_m2_g': bet,
             'Average_Bare_Pore_Diameter_nm': pore
         }
-        
+
         # Ensure all required features are present
         for feature in FEATURE_ORDER:
             if feature not in candidate:
@@ -478,7 +481,7 @@ def api_init():
             'BET_Bare_Surface_Area_m2_g': float(rec.get('BET_Bare_Surface_Area_m2_g', 0)),
             'Average_Bare_Pore_Diameter_nm': float(rec.get('Average_Bare_Pore_Diameter_nm', 0))
         }
-        
+
         # Ensure all required features are present
         for feature in FEATURE_ORDER:
             if feature not in candidate:
@@ -486,7 +489,7 @@ def api_init():
                     candidate[feature] = 0.0
                 else:
                     candidate[feature] = 0.0
-        
+
         cap = float(rec.get('CO2_Capacity_mmol_g', 0))
         exp_data = {
             'session_id': session_id,
@@ -540,11 +543,10 @@ def api_generate_candidates():
     n_candidates = request.json.get('n_candidates', 5)
     bo = create_bo_system(sid)
     candidates = bo.generate_candidates(n_candidates)
-
+    app.logger.info(candidates)
     session_data = db.get_session(sid)
     session_data['current_candidates'] = candidates
     db.update_session(sid, {'current_candidates': candidates})
-
     best_cap = float(bo.train_Y.max().item()) if bo.train_Y.numel() > 0 else 0.0
 
     return jsonify({
@@ -553,6 +555,114 @@ def api_generate_candidates():
         'best_capacity': best_cap
     })
 
+
+@app.route('/api/copy-session', methods=['POST'])
+def api_copy_session():
+    """Copy an existing session's configuration and historical records to a new session."""
+    data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': 'No data'}), 400
+
+    source_session_id = data.get('source_session_id')
+    if not source_session_id:
+        return jsonify({'success': False, 'error': 'Source session ID required'}), 400
+
+    # Get the source session
+    source_session = db.get_session(source_session_id)
+    if not source_session:
+        return jsonify({'success': False, 'error': 'Source session not found'}), 404
+
+    # Get source session experiments
+    source_experiments = db.get_experiments_by_session(source_session_id)
+
+    # Create new session ID
+    new_session_id = f"session_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    # Copy session data (excluding runtime data like best_capacity, current_candidates)
+    new_session_data = {
+        'created_at': datetime.now().isoformat(),
+        'status': 'initialized',
+        'search_bounds': source_session.get('search_bounds', {}),
+        'conditions': source_session.get('conditions', {}),
+        'best_capacity': 0.0,
+        'best_experiment': None,
+        'current_candidates': []
+    }
+
+    db.create_session(new_session_id, new_session_data)
+
+    # Copy only historical experiments from the source session
+    historical_records = [exp for exp in source_experiments if exp.get('is_historical', False)]
+    for exp in historical_records:
+        candidate = exp.get('candidate', {})
+        cap = exp.get('experimental_performance', 0.0)
+
+        # Ensure all required features are present
+        for feature in FEATURE_ORDER:
+            if feature not in candidate:
+                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
+                    candidate[feature] = 0.0
+                else:
+                    candidate[feature] = 0.0
+
+        exp_data = {
+            'session_id': new_session_id,
+            'candidate': candidate,
+            'predicted_performance': 0.0,
+            'uncertainty': 0.0,
+            'experimental_performance': cap,
+            'is_historical': True,
+            'timestamp': datetime.now().isoformat(),
+            'Temperature': exp.get('Temperature', 25.0),
+            'Humidity': exp.get('Humidity', 0),
+            'CO2_Concentration': exp.get('CO2_Concentration', 0.04),
+            'Flow_Rate': exp.get('Flow_Rate', 100.0),
+            'Test_Method': exp.get('Test_Method', 'TGA'),
+            'Notes': exp.get('Notes', 'Copied from session ' + source_session_id)
+        }
+        db.add_experiment(new_session_id, exp_data)
+
+    # Update session best based on all historical records
+    experiments = db.get_experiments_by_session(new_session_id)
+    best_cap = 0.0
+    best_exp = None
+    for exp in experiments:
+        cap = exp.get('experimental_performance', 0.0)
+        if cap > best_cap:
+            best_cap = cap
+            best_exp = exp.get('candidate')
+    db.update_session(new_session_id, {
+        'best_capacity': best_cap,
+        'best_experiment': best_exp
+    })
+
+    # Set as current session
+    session['current_session_id'] = new_session_id
+
+    return jsonify({
+        'success': True,
+        'new_session_id': new_session_id,
+        'message': f'Copied {len(historical_records)} historical records from session {source_session_id}'
+    })
+
+@app.route('/api/set-session', methods=['POST'])
+def api_set_session():
+    """Set the current session ID from URL parameter."""
+    data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': 'No data'}), 400
+
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'success': False, 'error': 'Session ID required'}), 400
+
+    # Verify the session exists
+    sess = db.get_session(session_id)
+    if not sess:
+        return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+    session['current_session_id'] = session_id
+    return jsonify({'success': True, 'session_id': session_id})
 @app.route('/api/record-experiment', methods=['POST'])
 def api_record_experiment():
     sid = get_active_session_id()
@@ -598,10 +708,10 @@ def api_record_experiment():
         **candidate,
         'actual_capacity': actual_capacity
     })
-    
+
     # Update the stored BO system in the session cache
     session_bo_systems[sid] = bo
-    
+
     total_data_points = bo.train_X.shape[0] if bo.train_X.ndim > 0 else 0
     real_exps = [e for e in db.get_experiments_by_session(sid) if not e.get('is_historical', False)]
 
@@ -634,7 +744,7 @@ def api_record_experiment_full():
         'Organic_Content_pct',
         'BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm'
     ]
-    
+
     for param in required_params:
         if param not in candidate or candidate[param] is None:
             candidate[param] = 0.0
@@ -648,7 +758,7 @@ def api_record_experiment_full():
         **candidate,
         'actual_capacity': actual_capacity
     })
-    
+
     # Update the stored BO system in the session cache
     session_bo_systems[sid] = bo
 
@@ -774,7 +884,7 @@ def api_generate_chart():
             valid_indices = []
             for i, u in enumerate(uncertainty_real):
                 has_valid_prediction = i < len(predicted_real) and predicted_real[i] is not None and predicted_real[i] != 0.0
-                is_valid_uncertainty = (u is not None and 
+                is_valid_uncertainty = (u is not None and
                                        not (isinstance(u, float) and (u != u or u == float('inf'))) and
                                        isinstance(u, (int, float)) and u >= 0)
                 if has_valid_prediction and is_valid_uncertainty:
@@ -880,15 +990,161 @@ def db_get_experiments():
         exps = db.get_all_experiments()
     return jsonify({'success': True, 'experiments': exps, 'count': len(exps)})
 
+
 @app.route('/db/export/csv', methods=['GET'])
 def db_export_csv():
+    """Export experiments as CSV with specific column names."""
     session_id = request.args.get('session_id')
-    df = db.export_to_csv(session_id)
-    os.makedirs('data/export', exist_ok=True)
-    csv_file = 'data/export/export.csv'
-    df.to_csv(csv_file, index=False)
-    return send_file(csv_file, as_attachment=True, download_name='experiments.csv')
 
+    # Get experiments
+    if session_id:
+        experiments = db.get_experiments_by_session(session_id)
+        if not experiments:
+            return jsonify({'success': False, 'error': 'No experiments found for this session'}), 404
+    else:
+        experiments = db.get_all_experiments()
+
+    if not experiments:
+        return jsonify({'success': False, 'error': 'No experiments found'}), 404
+
+    # Prepare data with specific column mapping
+    export_data = []
+
+    # Define column renaming mapping (original -> new name)
+    column_rename_map = {
+        # Session info
+        'session_id': 'Session_ID',
+        'experiment_id': 'Experiment_ID',
+        'timestamp': 'Timestamp',
+        'original_timestamp': 'Original_Timestamp',
+        'is_historical': 'Is_Historical',
+
+        # Performance metrics
+        'predicted_performance': 'Predicted_CO2_Capacity_mmol_g',
+        'experimental_performance': 'CO2_Capacity_mmol_g',
+        'uncertainty': 'Uncertainty',
+
+        # Candidate fields
+        'Support': 'Support',
+        'Amine_1_or_Additive_1': 'Amine_1_or_Additive_1',
+        'Amine_2_or_Additive_2': 'Amine_2_or_Additive_2',
+        'Organic_Content_pct': 'Organic_Content_pct',
+        'BET_Bare_Surface_Area_m2_g': 'BET_Bare_Surface_Area_m2_g',
+        'Average_Bare_Pore_Diameter_nm': 'Average_Bare_Pore_Diameter_nm',
+
+        # Experimental conditions (from candidate or root)
+        'Temperature': 'Temperature_C',
+        'CO2_Concentration': 'CO2_Concentration_vol_pct',
+        'Humidity': 'Relative_Humidity_pct',
+        'Flow_Rate': 'Flow_Rate_mL_min',
+        'Test_Method': 'CO2_Test_Method',
+
+        # Notes
+        'Notes': 'Notes',
+        'notes': 'Notes'  # Merge both notes fields
+    }
+
+    for exp in experiments:
+        row = {}
+        candidate = exp.get('candidate', {})
+
+        # Add all fields from experiment root
+        for key, value in exp.items():
+            if key != 'candidate':  # Skip candidate as we'll handle separately
+                new_key = column_rename_map.get(key, key)
+                # Handle duplicate notes field
+                if new_key == 'Notes' and new_key in row:
+                    # If Notes already exists, append
+                    row[new_key] = str(row.get(new_key, '')) + '; ' + str(value) if value else row.get(new_key, '')
+                else:
+                    row[new_key] = value
+
+        # Add fields from candidate
+        for key, value in candidate.items():
+            new_key = column_rename_map.get(key, key)
+            # Handle potential duplicates with root fields
+            if new_key in row and row[new_key] is not None and value is not None:
+                # If both exist and are different, prefer candidate value for material properties
+                if key in ['Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2',
+                           'Organic_Content_pct', 'BET_Bare_Surface_Area_m2_g',
+                           'Average_Bare_Pore_Diameter_nm']:
+                    row[new_key] = value
+                # For conditions, prefer the values from candidate if they exist
+                elif key in ['Temperature', 'CO2_Concentration', 'Humidity', 'Flow_Rate', 'Test_Method']:
+                    row[new_key] = value
+                elif key in ['Predicted_CO2_Capacity_mmol_g']:
+                    row[new_key] = value
+            else:
+                row[new_key] = value
+
+
+        # Ensure all required columns exist with defaults
+        required_columns = [
+            'Session_ID', 'Experiment_ID', 'Timestamp', 'Is_Historical',
+            'Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2',
+            'Organic_Content_pct', 'BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm',
+            'CO2_Capacity_mmol_g', 'Predicted_CO2_Capacity_mmol_g', 'Uncertainty',
+            'Temperature_C', 'CO2_Concentration_vol_pct', 'Relative_Humidity_pct',
+            'Flow_Rate_mL_min', 'CO2_Test_Method', 'Notes'
+        ]
+
+        for col in required_columns:
+            if col not in row:
+                row[col] = ''
+
+        export_data.append(row)
+
+    # Create DataFrame
+    df = pd.DataFrame(export_data)
+
+    # Define the final column order
+    column_order = [
+        # Experiment identifiers
+        'Session_ID', 'Experiment_ID', 'Timestamp', 'Original_Timestamp', 'Is_Historical',
+
+        # Material properties
+        'Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2',
+        'Organic_Content_pct', 'BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm',
+
+        # Experimental conditions
+        'Temperature_C', 'CO2_Concentration_vol_pct', 'Relative_Humidity_pct',
+        'Flow_Rate_mL_min', 'CO2_Test_Method',
+
+        # Performance metrics
+        'CO2_Capacity_mmol_g', 'Predicted_CO2_Capacity_mmol_g', 'Uncertainty',
+
+    ]
+
+    # Only include columns that exist in the dataframe
+    available_columns = [col for col in column_order if col in df.columns]
+
+    # Add any remaining columns that weren't in the order (at the end)
+    other_columns = [col for col in df.columns if col not in available_columns]
+    final_columns = available_columns + other_columns
+
+    df = df[final_columns]
+
+    # Create export directory if it doesn't exist
+    os.makedirs('data/export', exist_ok=True)
+
+    # # Generate filename with timestamp
+    # timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    # if session_id:
+    #     filename = f'experiments_session_{session_id[:8]}_{timestamp}.csv'
+    # else:
+    #     filename = f'all_experiments_{timestamp}.csv'
+    filename = 'experiments.csv'
+    csv_file = os.path.join('data/export', filename)
+
+    # Export to CSV with proper formatting
+    df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+
+    return send_file(
+        csv_file,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='text/csv'
+    )
 @app.route('/db/export/json', methods=['GET'])
 def db_export_json():
     session_id = request.args.get('session_id')

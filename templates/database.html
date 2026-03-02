@@ -90,16 +90,39 @@
                                 <th>Session ID</th>
                                 <th>Created</th>
                                 <th>Status</th>
-                                <th>Real Exps</th>
+                                <th>Total Exps</th>
+                                <th>Historical</th>
+                                <th>Real</th>
                                 <th>Best Capacity</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="sessionsTableBody">
-                            <tr><td colspan="6" class="text-center py-4">Loading...</td></tr>
+                            <tr><td colspan="8" class="text-center py-4">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Copy Session Modal -->
+<div class="modal fade" id="copySessionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Copy Session</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Create a new session with an exact copy of all experiments, search bounds, and conditions?</p>
+                <p class="text-muted small">The new session will be an identical duplicate including all historical and real experiments.</p>
+                <div class="alert alert-info" id="copySessionStats"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmCopyBtn" onclick="confirmCopySession()">Copy & Continue</button>
             </div>
         </div>
     </div>
@@ -108,6 +131,9 @@
 
 {% block scripts %}
 <script>
+let currentCopySessionId = null;
+let currentCopySessionData = null;
+
 document.addEventListener('DOMContentLoaded', function() {
     refreshStats();
     loadSessions();
@@ -121,7 +147,7 @@ async function refreshStats() {
         document.getElementById('totalSessions').innerText = s.total_sessions || 0;
         document.getElementById('totalExperiments').innerText = s.total_experiments || 0;
         document.getElementById('activeSessions').innerText = s.active_sessions || 0;
-        document.getElementById('bestPerformance').innerText = 
+        document.getElementById('bestPerformance').innerText =
             (s.best_performance || 0).toFixed(3);
     }
 }
@@ -131,33 +157,45 @@ async function loadSessions() {
     const data = await resp.json();
     const tbody = document.getElementById('sessionsTableBody');
     if (!data.success) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-danger">Error loading sessions</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-danger">Error loading sessions</td></tr>';
         return;
     }
     const sessions = data.sessions || {};
     if (Object.keys(sessions).length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No sessions found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-muted">No sessions found</td></tr>';
         return;
     }
     let html = '';
     for (const [sid, sess] of Object.entries(sessions)) {
-        const created = sess.created_at ? new Date(sess.created_at).toLocaleDateString() : '-';
-        const statusClass = sess.status === 'running' ? 'success' : 
+        // Fetch experiments count for this session
+        const expResp = await fetch(`/db/experiments?session_id=${sid}`);
+        const expData = await expResp.json();
+        const experiments = expData.experiments || [];
+        const historicalCount = experiments.filter(e => e.is_historical).length;
+        const realCount = experiments.filter(e => !e.is_historical).length;
+
+        const created = sess.created_at ? new Date(sess.created_at).toLocaleString() : '-';
+        const statusClass = sess.status === 'running' ? 'success' :
                            sess.status === 'completed' ? 'info' : 'secondary';
-        const expCount = sess.experiments ? sess.experiments.length : 0;
+
         html += `
             <tr>
                 <td><strong>${sid.slice(0,12)}…</strong></td>
-                <td>${created}</td>
+                <td><small>${created}</small></td>
                 <td><span class="badge bg-${statusClass}">${sess.status || 'unknown'}</span></td>
-                <td>${expCount}</td>
-                <td>${(sess.best_capacity || 0).toFixed(3)} mmol/g</td>
+                <td>${experiments.length}</td>
+                <td>${historicalCount}</td>
+                <td>${realCount}</td>
+                <td><strong>${(sess.best_capacity || 0).toFixed(3)}</strong> mmol/g</td>
                 <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="viewSession('${sid}')">
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewSession('${sid}')" title="View Details">
                         <i class="fas fa-eye"></i>
                     </button>
-                    <button class="btn btn-sm btn-outline-success" onclick="exportSession('${sid}')">
+                    <button class="btn btn-sm btn-outline-success" onclick="exportSession('${sid}')" title="Export">
                         <i class="fas fa-download"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" onclick="prepareCopySession('${sid}')" title="Copy & Reuse">
+                        <i class="fas fa-copy"></i>
                     </button>
                 </td>
             </tr>
@@ -181,14 +219,81 @@ function exportSession(sid) {
 }
 
 function viewSession(sid) {
-    // Could navigate to a session detail page; for now just alert.
-    alert(`Session ${sid} selected. Detailed view would open here.`);
+    window.location.href = `/session-detail?id=${sid}`;
+}
+
+async function prepareCopySession(sid) {
+    currentCopySessionId = sid;
+
+    // Fetch session details to show stats
+    const sessionResp = await fetch(`/db/session/${sid}`);
+    const sessionData = await sessionResp.json();
+
+    const expResp = await fetch(`/db/experiments?session_id=${sid}`);
+    const expData = await expResp.json();
+    const experiments = expData.experiments || [];
+    const historicalCount = experiments.filter(e => e.is_historical).length;
+    const realCount = experiments.filter(e => !e.is_historical).length;
+
+    document.getElementById('copySessionStats').innerHTML = `
+        <strong>Session to copy:</strong> ${sid.slice(0,12)}…<br>
+        <strong>Total experiments:</strong> ${experiments.length}<br>
+        <strong>Historical:</strong> ${historicalCount}<br>
+        <strong>Real experiments:</strong> ${realCount}<br>
+        <strong>Best capacity:</strong> ${(sessionData.session?.best_capacity || 0).toFixed(3)} mmol/g
+    `;
+
+    const modal = new bootstrap.Modal(document.getElementById('copySessionModal'));
+    modal.show();
+}
+
+async function confirmCopySession() {
+    if (!currentCopySessionId) return;
+
+    const modal = bootstrap.Modal.getInstance(document.getElementById('copySessionModal'));
+    modal.hide();
+
+    // Show loading overlay if it exists (from base template)
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    if (loadingOverlay) loadingOverlay.style.display = 'flex';
+
+    try {
+        const resp = await fetch('/api/copy-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                source_session_id: currentCopySessionId,
+                copy_all_experiments: true  // Flag to indicate we want ALL experiments
+            })
+        });
+
+        const data = await resp.json();
+        if (data.success) {
+            // Navigate to the main page with the new session and go to step 4
+            window.location.href = '/?session=' + data.new_session_id + '&step=4';
+        } else {
+            alert('Failed to copy session: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error copying session: ' + e.message);
+    } finally {
+        if (loadingOverlay) loadingOverlay.style.display = 'none';
+        currentCopySessionId = null;
+    }
 }
 
 async function resetDatabase() {
-    // This endpoint is not implemented by default; we call /api/reset-system? Actually that resets only current session.
-    // We'll add a hidden admin endpoint? For now, just warn.
-    alert('To reset the whole database, delete the files in data/database/ manually.');
+    if (confirm('Are you ABSOLUTELY sure? This will delete ALL sessions and experiments permanently!')) {
+        const resp = await fetch('/db/reset', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            alert('Database reset successfully');
+            refreshStats();
+            loadSessions();
+        } else {
+            alert('Failed to reset database');
+        }
+    }
 }
 </script>
 {% endblock %}

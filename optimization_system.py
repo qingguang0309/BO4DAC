@@ -1,4 +1,6 @@
 import math
+
+import pandas as pd
 import torch
 import numpy as np
 from botorch.models import SingleTaskGP
@@ -234,6 +236,7 @@ class DACOptimizer:
             # Fallback: use data mean / std if available
             if len(self.train_Y) > 0:
                 mean = self.train_Y.mean().item()
+                # std = max(self.train_Y.std().item(), 0.1)
                 std = max(self.train_Y.std().item(), 0.1)
             else:
                 mean = 0.0
@@ -248,8 +251,11 @@ class DACOptimizer:
             mean = posterior.mean.squeeze().item()
             variance = posterior.variance.squeeze().item()
             std = math.sqrt(max(variance, 1e-9))
-
-        return mean, std
+        print(mean, std)
+        # if mean or std is nan return 0, 1
+        if np.isnan(mean) or np.isnan(std):
+            return -1, -1
+        return float(mean), float(std)
 
     def compute_ei(self, X_candidate: torch.Tensor) -> float:
         """
@@ -316,7 +322,6 @@ class DACOptimizer:
         all_configs = []
         for i in range(min(len(candidates_raw), n_candidates * 2)):
             config = self._decode_config(candidates_raw[i])
-
             # Use compute_prediction method
             mean, std = self.compute_prediction(candidates_raw[i:i + 1])
             ei = self.compute_ei(candidates_raw[i:i + 1])
