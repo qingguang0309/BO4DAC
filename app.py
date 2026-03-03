@@ -1245,4 +1245,4 @@ if __name__ == '__main__':
     if os.path.exists(encoder_path):
         encoder.load_encoders(encoder_path)
 
-    app.run(debug=True, port=5001)
+    app.run(debug=True, host='0.0.0.0',port=5001)
