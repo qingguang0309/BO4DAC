@@ -1629,6 +1629,7 @@ async function submitExperiment(idx) {
         showNotification('Please enter a valid number', 'warning');
         return;
     }
+    console.info(cand)
     showLoading();
     try {
         // Use the comprehensive API endpoint that preserves the original predicted capacity

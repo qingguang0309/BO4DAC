@@ -596,7 +596,7 @@ def api_generate_candidates():
 
     bo = create_bo_system(sid)
     candidates = bo.generate_candidates(n_candidates)
-    app.logger.info(candidates)
+    app.logger.info(f"genreating candidates {candidates}")
     session_data = db.get_session(sid)
     session_data['current_candidates'] = candidates
     db.update_session(sid, {'current_candidates': candidates})
@@ -807,7 +807,7 @@ def api_record_experiment_full():
     candidate = data.get('candidate', {})
     actual_capacity_input = data.get('actual_capacity')
     notes = data.get('notes', '')  # Notes can be empty
-
+    app.logger.info(f"submit candidate, {candidate}")
     # Validate required fields in candidate are present and not empty
     if not candidate.get('Support') or candidate.get('Support') == '':
         return jsonify({'success': False, 'error': 'Support is required and cannot be empty'}), 400
@@ -873,6 +873,7 @@ def api_record_experiment_full():
         'Flow_Rate': candidate.get('Flow_Rate', 100.0),
         'Test_Method': candidate.get('Test_Method', 'TGA')
     }
+    # app.logger.info(exp_data)
     db.add_experiment(sid, exp_data)
 
     session_data = db.get_session(sid)
@@ -1347,4 +1348,4 @@ if __name__ == '__main__':
     if os.path.exists(encoder_path):
         encoder.load_encoders(encoder_path)
 
-    app.run(debug=True, host='0.0.0.0',port=5001,use_reloader=False)
+    app.run(debug=True, host='0.0.0.0',port=5001,use_reloader=True)

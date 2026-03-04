@@ -249,61 +249,62 @@ class DACOptimizer:
     def compute_prediction(self, X_candidate: torch.Tensor) -> Tuple[float, float]:
         """
         Compute mean and standard deviation prediction for a candidate point.
-        Uses the current GP model if available, otherwise falls back to data statistics.
+
+        Uses the current GP model if available and enough data are present,
+        otherwise falls back to simple data statistics.
 
         Args:
             X_candidate: Tensor of shape (1, d) or (d,)
 
         Returns:
-            Tuple of (mean, std)
+            Tuple of (mean, std) as Python floats.
         """
+        # Ensure 2D shape: (1, d)
         if X_candidate.dim() == 1:
             X_candidate = X_candidate.unsqueeze(0)
 
-        if self.gp_model is None or not self._has_enough_data():
-            # Fallback: use data mean / std if available
-            if len(self.train_Y) > 0:
+        # Helper to compute fallback statistics from training data
+        def fallback_stats() -> Tuple[float, float]:
+            if len(self.train_Y) > 1:
                 mean = self.train_Y.mean().item()
+                # Ensure a minimum standard deviation to avoid zero std
                 std = max(self.train_Y.std().item(), 0.1)
             else:
                 mean = 0.0
                 std = 1.0
             return mean, std
 
-        # Normalise candidate
+        # If GP model not ready, use fallback
+        if self.gp_model is None or not self._has_enough_data():
+            return fallback_stats()
+
+        # Normalize candidate to [0,1] using stored bounds
         X_norm = normalize(X_candidate, self.bounds)
 
-        with torch.no_grad(), gpytorch.settings.fast_pred_var():
-            # try:
+        try:
+            with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 posterior = self.gp_model.posterior(X_norm)
                 mean = posterior.mean.squeeze().item()
                 variance = posterior.variance.squeeze().item()
-                std = math.sqrt(max(variance, 1e-9))
-                return mean, std
-            # except Exception as e:
-            #     print(f"Error in GP prediction: {e}")
-            #     # Return fallback values if prediction fails
-            #     if len(self.train_Y) > 0:
-            #         mean = self.train_Y.mean().item()
-            #         std = max(self.train_Y.std().item(), 0.1)
-            #     else:
-            #         mean = 0.0
-            #         std = 1.0
-            #     return mean, std
 
-        # Check if results are valid numbers
-        if np.isnan(mean) or np.isnan(std) or np.isinf(mean) or np.isinf(std):
-            print(f"Warning: Invalid prediction result - mean: {mean}, std: {std}")
-            # Return fallback values
-            if len(self.train_Y) > 0:
-                mean = self.train_Y.mean().item()
-                std = max(self.train_Y.std().item(), 0.1)
-            else:
-                mean = 0.0
-                std = 1.0
+            # Sanitize outputs: ensure finite and non‑negative variance
+            if not math.isfinite(mean):
+                print(f"Warning: GP mean is {mean}; falling back to data stats")
+                return fallback_stats()
+
+            if not math.isfinite(variance) or variance < 0:
+                print(f"Warning: GP variance is {variance}; using minimal variance")
+                variance = 1e-6
+
+            std = math.sqrt(variance)
             return mean, std
 
-        return float(mean), float(std)
+        except Exception as e:
+            print(f"Error in GP prediction: {e}")
+            mean, std = fallback_stats()
+            print(f"Computed mean and std as {mean}, {std}")
+            return mean, std
+
 
     def compute_ei(self, X_candidate: torch.Tensor) -> float:
         """
@@ -392,15 +393,17 @@ class DACOptimizer:
 
         # Stage 2: decode, compute predictions, rank by EI
         all_configs = []
-        for i in range(min(len(candidates_raw), self.Q_VALUES)):
-            config = self._decode_config(candidates_raw[i])
+        for candidate in candidates_raw:
+            config = self._decode_config(candidate)
             # Use compute_prediction method
-            mean, std = self.compute_prediction(candidates_raw[i:i + 1])
-            ei = self.compute_ei(candidates_raw[i:i + 1])
+            mean, std = self.compute_prediction(candidate)
+            ei = self.compute_ei(candidate)
 
             config['Predicted_CO2_Capacity_mmol_g'] = round(mean, 4)
+
             config['Uncertainty'] = round(std, 4)
             config['Expected_Improvement'] = ei
+
             all_configs.append(config)
 
         # Sort by EI descending and return top n_candidates
