@@ -219,7 +219,7 @@ function exportSession(sid) {
 }
 
 function viewSession(sid) {
-    window.location.href = `/session-detail?id=${sid}`;
+    window.location.href = `/?session=${sid}&step=4`;
 }
 
 async function prepareCopySession(sid) {
@@ -262,8 +262,7 @@ async function confirmCopySession() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                source_session_id: currentCopySessionId,
-                copy_all_experiments: true  // Flag to indicate we want ALL experiments
+                source_session_id: currentCopySessionId
             })
         });
 

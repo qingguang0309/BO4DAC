@@ -1556,7 +1556,7 @@ function displayCandidates(candidates) {
             <div class="list-group-item candidate-card">
                 <div class="d-flex w-100 justify-content-between">
                     <h6 class="mb-1">#${idx+1} – ${c.Predicted_CO2_Capacity_mmol_g.toFixed(4)} mmol/g</h6>
-                    <small class="text-info">EI: ${c.Expected_Improvement.toFixed(4)}</small>
+                    <small class="text-info">Uncertainty: ${c.Uncertainty}</small>
                 </div>
                 <p class="mb-1 small">
                     Support: ${c.Support} · Amine1: ${c.Amine_1_or_Additive_1} · Amine2: ${c.Amine_2_or_Additive_2} ·
@@ -1975,7 +1975,7 @@ function showExperimentDetails(index, experiment) {
                                 <ul class="list-unstyled">
                                     <li><strong>Experimental Capacity:</strong> ${experiment.experimental_performance ? experiment.experimental_performance.toFixed(4) : 'N/A'} mmol/g</li>
                                     <li><strong>Predicted Capacity:</strong> ${experiment.predicted_performance ? experiment.predicted_performance.toFixed(4) : 'N/A'} mmol/g</li>
-                                    <li><strong>Uncertainty:</strong> ${experiment.uncertainty ? experiment.uncertainty.toFixed(4) : 'N/A'}</li>
+                                    <li><strong>Uncertainty:</strong> ${experiment.uncertainty ? experiment.uncertainty : 'N/A'}</li>
                                     <li><strong>Is Historical:</strong> ${experiment.is_historical ? 'Yes' : 'No'}</li>
                                     <li><strong>Timestamp:</strong> ${experiment.timestamp ? new Date(experiment.timestamp).toLocaleString() : 'N/A'}</li>
                                 </ul>

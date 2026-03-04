@@ -72,7 +72,7 @@ class DACOptimizer:
     # Indices for categorical / continuous features (0‑based)
     CATEGORICAL_DIMS = [0, 1, 2]
     CONTINUOUS_DIMS = [3, 4, 5]
-
+    Q_VALUES = 10
     def __init__(self,
                  categorical_bounds: Dict[str, List[str]],
                  continuous_bounds: Dict[str, tuple[float, float]],
@@ -270,37 +270,26 @@ class DACOptimizer:
                 std = 1.0
             return mean, std
 
-        # Check for NaN/Inf in the input candidate
-        if torch.isnan(X_candidate).any() or torch.isinf(X_candidate).any():
-            print(f"Warning: NaN or Inf detected in X_candidate: {X_candidate}")
-            # Replace with zeros if invalid
-            X_candidate = torch.nan_to_num(X_candidate, nan=0.0, posinf=None, neginf=None)
-
         # Normalise candidate
         X_norm = normalize(X_candidate, self.bounds)
-        
-        # Check for NaN/Inf after normalization
-        if torch.isnan(X_norm).any() or torch.isinf(X_norm).any():
-            print(f"Warning: NaN or Inf detected in X_norm: {X_norm}")
-            # Replace with zeros if invalid
-            X_norm = torch.nan_to_num(X_norm, nan=0.0, posinf=None, neginf=None)
 
         with torch.no_grad(), gpytorch.settings.fast_pred_var():
-            try:
+            # try:
                 posterior = self.gp_model.posterior(X_norm)
                 mean = posterior.mean.squeeze().item()
                 variance = posterior.variance.squeeze().item()
                 std = math.sqrt(max(variance, 1e-9))
-            except Exception as e:
-                print(f"Error in GP prediction: {e}")
-                # Return fallback values if prediction fails
-                if len(self.train_Y) > 0:
-                    mean = self.train_Y.mean().item()
-                    std = max(self.train_Y.std().item(), 0.1)
-                else:
-                    mean = 0.0
-                    std = 1.0
                 return mean, std
+            # except Exception as e:
+            #     print(f"Error in GP prediction: {e}")
+            #     # Return fallback values if prediction fails
+            #     if len(self.train_Y) > 0:
+            #         mean = self.train_Y.mean().item()
+            #         std = max(self.train_Y.std().item(), 0.1)
+            #     else:
+            #         mean = 0.0
+            #         std = 1.0
+            #     return mean, std
 
         # Check if results are valid numbers
         if np.isnan(mean) or np.isnan(std) or np.isinf(mean) or np.isinf(std):
@@ -374,13 +363,13 @@ class DACOptimizer:
 
         # Stage 1: generate raw candidates (twice as many for later filtering)
         if not self._has_enough_data() or self.gp_model is None:
-            candidates_raw = self._random_candidates(n_candidates * 2)
+            candidates_raw = self._random_candidates(self.Q_VALUES)
         else:
             # Ensure training data dimension matches bounds
             if self.train_X.shape[1] != self.bounds.shape[1]:
-                print(
+                raise RuntimeError(
                     f"Warning: train_X dim {self.train_X.shape[1]} != bounds dim {self.bounds.shape[1]}. Falling back to random.")
-                candidates_raw = self._random_candidates(n_candidates * 2)
+                # candidates_raw = self._random_candidates(self.Q_VALUES)
             else:
                 # Use the fitted GP model
                 best_f = self.train_Y.max().item()
@@ -393,24 +382,24 @@ class DACOptimizer:
                 candidates_norm, _ = optimize_acqf(
                     acq_function=qEI,
                     bounds=norm_bounds,
-                    q=n_candidates * 2,  # generate twice as many
-                    num_restarts=10,
-                    raw_samples=1000,
-                    options={"maxiter": 100}
+                    q=self.Q_VALUES,
+                    num_restarts=20,
+                    raw_samples=2048,
+                    options={"maxiter": 200}
                 )
                 candidates_raw = unnormalize(candidates_norm, self.bounds)
                 candidates_raw = self._round_categorical(candidates_raw)
 
         # Stage 2: decode, compute predictions, rank by EI
         all_configs = []
-        for i in range(min(len(candidates_raw), n_candidates * 2)):
+        for i in range(min(len(candidates_raw), self.Q_VALUES)):
             config = self._decode_config(candidates_raw[i])
             # Use compute_prediction method
             mean, std = self.compute_prediction(candidates_raw[i:i + 1])
             ei = self.compute_ei(candidates_raw[i:i + 1])
 
-            config['Predicted_CO2_Capacity_mmol_g'] = mean
-            config['Uncertainty'] = std
+            config['Predicted_CO2_Capacity_mmol_g'] = round(mean, 4)
+            config['Uncertainty'] = round(std, 4)
             config['Expected_Improvement'] = ei
             all_configs.append(config)
 

@@ -8,7 +8,7 @@ from threading import Lock
 import torch
 import numpy as np
 import pandas as pd
-from flask import Flask, request, jsonify, send_file, render_template, session
+from flask import Flask, request, jsonify, send_file, render_template, session, redirect
 from flask_cors import CORS
 
 # --- Database & Configuration ---
@@ -644,9 +644,8 @@ def api_copy_session():
 
     db.create_session(new_session_id, new_session_data)
 
-    # Copy only historical experiments from the source session
-    historical_records = [exp for exp in source_experiments if exp.get('is_historical', False)]
-    for exp in historical_records:
+    # Copy ALL experiments from the source session (both historical and real)
+    for exp in source_experiments:
         candidate = exp.get('candidate', {})
         cap = exp.get('experimental_performance', 0.0)
 
@@ -661,21 +660,22 @@ def api_copy_session():
         exp_data = {
             'session_id': new_session_id,
             'candidate': candidate,
-            'predicted_performance': 0.0,
-            'uncertainty': 0.0,
+            'predicted_performance': exp.get('predicted_performance', 0.0),
+            'uncertainty': exp.get('uncertainty', 0.0),
             'experimental_performance': cap,
-            'is_historical': True,
-            'timestamp': datetime.now().isoformat(),
+            'is_historical': exp.get('is_historical', False),  # Preserve original is_historical flag
+            'original_timestamp': exp.get('timestamp', datetime.now().isoformat()),  # Preserve original timestamp
+            'timestamp': datetime.now().isoformat(),  # New timestamp for the copy
             'Temperature': exp.get('Temperature', 25.0),
             'Humidity': exp.get('Humidity', 0),
             'CO2_Concentration': exp.get('CO2_Concentration', 0.04),
             'Flow_Rate': exp.get('Flow_Rate', 100.0),
             'Test_Method': exp.get('Test_Method', 'TGA'),
-            'Notes': exp.get('Notes', 'Copied from session ' + source_session_id)
+            'Notes': exp.get('Notes', '') + f' (Copied from session {source_session_id})'
         }
         db.add_experiment(new_session_id, exp_data)
 
-    # Update session best based on all historical records
+    # Update session best based on all records (both historical and real)
     experiments = db.get_experiments_by_session(new_session_id)
     best_cap = 0.0
     best_exp = None
@@ -695,7 +695,7 @@ def api_copy_session():
     return jsonify({
         'success': True,
         'new_session_id': new_session_id,
-        'message': f'Copied {len(historical_records)} historical records from session {source_session_id}'
+        'message': f'Copied {len(experiments)} historical records from session {source_session_id}'
     })
 
 @app.route('/api/set-session', methods=['POST'])
@@ -1319,6 +1319,15 @@ def database_page():
 # ----------------------------------------------------------------------
 # Health check
 # ----------------------------------------------------------------------
+@app.route('/session-detail')
+def session_detail():
+    """Redirect to main page with session parameter."""
+    session_id = request.args.get('id')
+    if session_id:
+        return redirect(f'/?session={session_id}&step=4')
+    else:
+        return redirect('/')
+
 @app.route('/health')
 def health():
     return jsonify({'status': 'ok', 'database': db.db_dir is not None})
@@ -1338,4 +1347,4 @@ if __name__ == '__main__':
     if os.path.exists(encoder_path):
         encoder.load_encoders(encoder_path)
 
-    app.run(debug=True, host='0.0.0.0',port=5001)
+    app.run(debug=True, host='0.0.0.0',port=5001,use_reloader=False)
