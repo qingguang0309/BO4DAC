@@ -457,14 +457,36 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
 def api_init():
     data = request.json
     if not data:
-        return jsonify({'success': False, 'error': 'No data'}), 400
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    # Validate required fields
+    search_bounds = data.get('searchBounds')
+    conditions = data.get('conditions')
+    
+    if not search_bounds:
+        return jsonify({'success': False, 'error': 'searchBounds are required'}), 400
+    
+    if not conditions:
+        return jsonify({'success': False, 'error': 'conditions are required'}), 400
+
+    # Validate that search_bounds has required sub-fields
+    required_search_bounds = ['supports', 'amine1', 'amine2']
+    for bound in required_search_bounds:
+        if not search_bounds.get(bound):
+            return jsonify({'success': False, 'error': f'{bound} is required in searchBounds'}), 400
+
+    # Validate that conditions has required fields
+    required_conditions = ['temperature', 'co2Concentration', 'humidity', 'flowRate', 'testMethod']
+    for condition in required_conditions:
+        if condition not in conditions or conditions[condition] is None:
+            return jsonify({'success': False, 'error': f'{condition} is required in conditions'}), 400
 
     session_id = f"session_{datetime.now().strftime('%Y%m%d%H%M%S')}"
     session_data = {
         'created_at': datetime.now().isoformat(),
         'status': 'initialized',
-        'search_bounds': data.get('searchBounds', {}),
-        'conditions': data.get('conditions', {}),
+        'search_bounds': search_bounds,
+        'conditions': conditions,
         'best_capacity': 0.0,
         'best_experiment': None,
         'current_candidates': []
@@ -473,13 +495,30 @@ def api_init():
 
     # 1. Add user‑provided historical records (from Step 3 form)
     for rec in data.get('historicalRecords', []):
+        # Validate required fields in historical records
+        if not rec.get('Support') or not rec.get('Amine_1_or_Additive_1'):
+            return jsonify({'success': False, 'error': 'Support and Amine_1_or_Additive_1 are required in historical records'}), 400
+            
+        # Validate numeric values
+        try:
+            organic_content = float(rec.get('Organic_Content_pct', 0))
+            bet_surface_area = float(rec.get('BET_Bare_Surface_Area_m2_g', 0))
+            pore_diameter = float(rec.get('Average_Bare_Pore_Diameter_nm', 0))
+            cap = float(rec.get('CO2_Capacity_mmol_g', 0))
+            
+            # Validate positive values where appropriate
+            if organic_content < 0 or bet_surface_area < 0 or pore_diameter < 0 or cap < 0:
+                return jsonify({'success': False, 'error': 'Numeric values must be non-negative'}), 400
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'Numeric parameters must be valid numbers'}), 400
+
         candidate = {
             'Support': rec.get('Support'),
             'Amine_1_or_Additive_1': rec.get('Amine_1_or_Additive_1'),
             'Amine_2_or_Additive_2': rec.get('Amine_2_or_Additive_2', 'No'),
-            'Organic_Content_pct': float(rec.get('Organic_Content_pct', 0)),
-            'BET_Bare_Surface_Area_m2_g': float(rec.get('BET_Bare_Surface_Area_m2_g', 0)),
-            'Average_Bare_Pore_Diameter_nm': float(rec.get('Average_Bare_Pore_Diameter_nm', 0))
+            'Organic_Content_pct': organic_content,
+            'BET_Bare_Surface_Area_m2_g': bet_surface_area,
+            'Average_Bare_Pore_Diameter_nm': pore_diameter
         }
 
         # Ensure all required features are present
@@ -490,7 +529,6 @@ def api_init():
                 else:
                     candidate[feature] = 0.0
 
-        cap = float(rec.get('CO2_Capacity_mmol_g', 0))
         exp_data = {
             'session_id': session_id,
             'candidate': candidate,
@@ -540,7 +578,22 @@ def api_generate_candidates():
     if not sid:
         return jsonify({'success': False, 'error': 'No active session'}), 400
 
-    n_candidates = request.json.get('n_candidates', 5)
+    data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    n_candidates_input = data.get('n_candidates', 5)
+    
+    # Validate n_candidates is a positive integer within reasonable limits
+    try:
+        n_candidates = int(n_candidates_input)
+        if n_candidates <= 0:
+            return jsonify({'success': False, 'error': 'n_candidates must be a positive integer'}), 400
+        if n_candidates > 100:  # Reasonable upper limit
+            return jsonify({'success': False, 'error': 'n_candidates cannot exceed 100'}), 400
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'n_candidates must be a valid integer'}), 400
+
     bo = create_bo_system(sid)
     candidates = bo.generate_candidates(n_candidates)
     app.logger.info(candidates)
@@ -670,13 +723,31 @@ def api_record_experiment():
         return jsonify({'success': False, 'error': 'No active session'}), 400
 
     data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
     candidate_idx = data.get('candidate_id')
-    actual_capacity = float(data.get('actual_capacity'))
-    notes = data.get('notes', '')
+    actual_capacity_input = data.get('actual_capacity')
+    notes = data.get('notes', '')  # Notes can be empty
+
+    # Validate required fields are present and not empty/None
+    if candidate_idx is None or candidate_idx == '':
+        return jsonify({'success': False, 'error': 'candidate_id is required and cannot be empty'}), 400
+
+    if actual_capacity_input is None or actual_capacity_input == '':
+        return jsonify({'success': False, 'error': 'actual_capacity is required and cannot be empty'}), 400
+
+    # Validate actual_capacity is a number and positive
+    try:
+        actual_capacity = float(actual_capacity_input)
+        if actual_capacity < 0:
+            return jsonify({'success': False, 'error': 'actual_capacity must be a positive number'}), 400
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'actual_capacity must be a valid number'}), 400
 
     session_data = db.get_session(sid)
     candidates = session_data.get('current_candidates', [])
-    if candidate_idx is None or candidate_idx >= len(candidates):
+    if candidate_idx is None or candidate_idx == '' or candidate_idx >= len(candidates):
         return jsonify({'success': False, 'error': 'Invalid candidate index'}), 400
 
     candidate = candidates[candidate_idx]
@@ -730,24 +801,46 @@ def api_record_experiment_full():
         return jsonify({'success': False, 'error': 'No active session'}), 400
 
     data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
     candidate = data.get('candidate', {})
-    app.logger.info(candidate)
-    actual_capacity = float(data.get('actual_capacity'))
-    notes = data.get('notes', '')
+    actual_capacity_input = data.get('actual_capacity')
+    notes = data.get('notes', '')  # Notes can be empty
 
-    # Validate required fields
-    if not candidate.get('Support') or not candidate.get('Amine_1_or_Additive_1'):
-        return jsonify({'success': False, 'error': 'Support and Amine_1_or_Additive_1 are required'}), 400
+    # Validate required fields in candidate are present and not empty
+    if not candidate.get('Support') or candidate.get('Support') == '':
+        return jsonify({'success': False, 'error': 'Support is required and cannot be empty'}), 400
+    if not candidate.get('Amine_1_or_Additive_1') or candidate.get('Amine_1_or_Additive_1') == '':
+        return jsonify({'success': False, 'error': 'Amine_1_or_Additive_1 is required and cannot be empty'}), 400
+    if actual_capacity_input is None or actual_capacity_input == '':
+        return jsonify({'success': False, 'error': 'actual_capacity is required and cannot be empty'}), 400
 
-    # Ensure all parameters are present with defaults if missing
+    # Validate actual_capacity is a number and positive
+    try:
+        actual_capacity = float(actual_capacity_input)
+        if actual_capacity < 0:
+            return jsonify({'success': False, 'error': 'actual_capacity must be a positive number'}), 400
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'actual_capacity must be a valid number'}), 400
+
+    # Validate required continuous parameters exist, are not empty, and are positive numbers
     required_params = [
         'Organic_Content_pct',
         'BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm'
     ]
 
     for param in required_params:
-        if param not in candidate or candidate[param] is None:
-            candidate[param] = 0.0
+        param_value = candidate.get(param)
+        if param_value is None or param_value == '':
+            return jsonify({'success': False, 'error': f'{param} is required and cannot be empty'}), 400
+        
+        try:
+            param_float = float(param_value)
+            if param_float <= 0:
+                return jsonify({'success': False, 'error': f'{param} must be a positive number'}), 400
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': f'{param} must be a valid number'}), 400
 
     # Get the original predicted capacity from the data or from the candidate if it's available
     original_predicted_capacity = data.get('original_predicted_capacity', candidate.get('Predicted_CO2_Capacity_mmol_g', 0.0))

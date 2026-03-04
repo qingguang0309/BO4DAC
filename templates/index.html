@@ -65,6 +65,12 @@
         to { opacity: 1; transform: translateY(0); }
     }
 
+    /* Required field indicator */
+    .form-label.required::after {
+        content: " *";
+        color: red;
+    }
+
     /* Multi-select items - improved for long amine names */
     .multi-select-item {
         padding: 6px 10px;
@@ -613,14 +619,14 @@
                             <h6><i class="fas fa-vial me-2"></i>Material Properties</h6>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Support Material</label>
-                                    <select id="exp-support-modal" class="form-select">
+                                    <label class="form-label required">Support Material</label>
+                                    <select id="exp-support-modal" class="form-select" required>
                                         <option value="">Select Support</option>
                                     </select>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Amine 1 / Additive 1</label>
-                                    <select id="exp-amine1-modal" class="form-select">
+                                    <label class="form-label required">Amine 1 / Additive 1</label>
+                                    <select id="exp-amine1-modal" class="form-select" required>
                                         <option value="">Select Amine 1</option>
                                     </select>
                                 </div>
@@ -631,16 +637,16 @@
                                     </select>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Organic Content (%)</label>
-                                    <input type="number" id="exp-oc-modal" class="form-control" step="0.1" placeholder="e.g., 25.0">
+                                    <label class="form-label required">Organic Content (%)</label>
+                                    <input type="number" id="exp-oc-modal" class="form-control" step="0.1" placeholder="e.g., 25.0" required>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">BET Surface Area (m²/g)</label>
-                                    <input type="number" id="exp-bet-modal" class="form-control" step="0.1" placeholder="e.g., 600.0">
+                                    <label class="form-label required">BET Surface Area (m²/g)</label>
+                                    <input type="number" id="exp-bet-modal" class="form-control" step="0.1" placeholder="e.g., 600.0" required>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Pore Diameter (nm)</label>
-                                    <input type="number" id="exp-pore-modal" class="form-control" step="0.1" placeholder="e.g., 8.0">
+                                    <label class="form-label required">Pore Diameter (nm)</label>
+                                    <input type="number" id="exp-pore-modal" class="form-control" step="0.1" placeholder="e.g., 8.0" required>
                                 </div>
                             </div>
                         </div>
@@ -648,24 +654,25 @@
                             <h6><i class="fas fa-thermometer-half me-2"></i>Experimental Conditions</h6>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Temperature (°C)</label>
-                                    <input type="number" id="exp-temp-modal" class="form-control" step="0.1" value="25.0">
+                                    <label class="form-label required">Temperature (°C)</label>
+                                    <input type="number" id="exp-temp-modal" class="form-control" step="0.1" value="25.0" required>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">CO₂ Concentration (vol%)</label>
-                                    <input type="number" id="exp-co2-modal" class="form-control" step="0.01" value="0.04">
+                                    <label class="form-label required">CO₂ Concentration (vol%)</label>
+                                    <input type="number" id="exp-co2-modal" class="form-control" step="0.01" value="0.04" required>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Humidity (%)</label>
-                                    <input type="number" id="exp-humidity-modal" class="form-control" step="1" value="0">
+                                    <label class="form-label required">Humidity (%)</label>
+                                    <input type="number" id="exp-humidity-modal" class="form-control" step="1" value="0" required>
                                 </div>
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">Flow Rate (mL/min)</label>
-                                    <input type="number" id="exp-flow-modal" class="form-control" step="1" value="100.0">
+                                    <label class="form-label required">Flow Rate (mL/min)</label>
+                                    <input type="number" id="exp-flow-modal" class="form-control" step="1" value="100.0" required>
                                 </div>
                                 <div class="col-md-12 mb-3">
-                                    <label class="form-label">Test Method</label>
-                                    <select id="exp-test-method-modal" class="form-select">
+                                    <label class="form-label required">Test Method</label>
+                                    <select id="exp-test-method-modal" class="form-select" required>
+                                        <option value="">Select Test Method</option>
                                         <option value="TGA">TGA</option>
                                         <option value="BET">BET</option>
                                         <option value="Breakthrough">Breakthrough</option>
@@ -684,8 +691,8 @@
                             <h6><i class="fas fa-flask me-2"></i>Performance Results</h6>
                             <div class="row">
                                 <div class="col-md-6 mb-3">
-                                    <label class="form-label">CO₂ Capacity (mmol/g)</label>
-                                    <input type="number" id="exp-capacity-modal" class="form-control" step="0.001" placeholder="e.g., 2.500">
+                                    <label class="form-label required">CO₂ Capacity (mmol/g)</label>
+                                    <input type="number" id="exp-capacity-modal" class="form-control" step="0.001" placeholder="e.g., 2.500" required>
                                 </div>
                             </div>
                         </div>
@@ -1810,7 +1817,11 @@ function submitExperimentFromModal() {
     const capacity = capacityEl && capacityEl.value ? parseFloat(capacityEl.value) : NaN;
     const notes = document.getElementById('exp-notes-modal') ? document.getElementById('exp-notes-modal').value : '';
 
-    if (!candidate.Support || !candidate['Amine_1_or_Additive_1'] || isNaN(capacity)) {
+    if (!candidate.Support || !candidate['Amine_1_or_Additive_1'] || 
+        isNaN(candidate['Organic_Content_pct']) || 
+        isNaN(candidate['BET_Bare_Surface_Area_m2_g']) || 
+        isNaN(candidate['Average_Bare_Pore_Diameter_nm']) || 
+        isNaN(capacity)) {
         showNotification('Please fill all required fields with valid values.', 'warning');
         return;
     }

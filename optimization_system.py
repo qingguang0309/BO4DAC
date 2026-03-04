@@ -205,18 +205,46 @@ class DACOptimizer:
             self.mll = None
             return
 
+        # Check for and clean NaN/infinite values in training data
+        if torch.isnan(self.train_X).any() or torch.isinf(self.train_X).any():
+            print("Warning: Cleaning NaN/Inf values from train_X before normalization")
+            self.train_X = torch.nan_to_num(self.train_X, nan=0.0, posinf=None, neginf=None)
+            
+        if torch.isnan(self.train_Y).any() or torch.isinf(self.train_Y).any():
+            print("Warning: Cleaning NaN/Inf values from train_Y before normalization")
+            self.train_Y = torch.nan_to_num(self.train_Y, nan=0.0, posinf=None, neginf=None)
+
         # Normalise training data
         train_X_norm = normalize(self.train_X, self.bounds)
+        
+        # Check for and clean NaN/infinite values after normalization
+        if torch.isnan(train_X_norm).any() or torch.isinf(train_X_norm).any():
+            print("Warning: Cleaning NaN/Inf values from normalized train_X")
+            train_X_norm = torch.nan_to_num(train_X_norm, nan=0.0, posinf=None, neginf=None)
+        
         train_Y = self.train_Y if self.train_Y.dim() == 2 else self.train_Y.unsqueeze(-1)
+        
+        # Check for and clean NaN/infinite values in Y
+        if torch.isnan(train_Y).any() or torch.isinf(train_Y).any():
+            print("Warning: Cleaning NaN/Inf values from train_Y")
+            train_Y = torch.nan_to_num(train_Y, nan=0.0, posinf=None, neginf=None)
 
-        # Create and fit GP
-        self.gp_model = SingleTaskGP(
-            train_X_norm,
-            train_Y,
-            outcome_transform=Standardize(m=1)
-        )
-        self.mll = ExactMarginalLogLikelihood(self.gp_model.likelihood, self.gp_model)
-        fit_gpytorch_mll(self.mll)
+        try:
+            # Create and fit GP
+            self.gp_model = SingleTaskGP(
+                train_X_norm,
+                train_Y,
+                outcome_transform=Standardize(m=1)
+            )
+            self.mll = ExactMarginalLogLikelihood(self.gp_model.likelihood, self.gp_model)
+            fit_gpytorch_mll(self.mll)
+        except Exception as e:
+            print(f"Error fitting GP model: {e}")
+            print(f"train_X_norm shape: {train_X_norm.shape}, contains NaN: {torch.isnan(train_X_norm).any()}")
+            print(f"train_Y shape: {train_Y.shape}, contains NaN: {torch.isnan(train_Y).any()}")
+            # Fallback: set model to None to avoid crash
+            self.gp_model = None
+            self.mll = None
 
     def compute_prediction(self, X_candidate: torch.Tensor) -> Tuple[float, float]:
         """
@@ -236,25 +264,56 @@ class DACOptimizer:
             # Fallback: use data mean / std if available
             if len(self.train_Y) > 0:
                 mean = self.train_Y.mean().item()
-                # std = max(self.train_Y.std().item(), 0.1)
                 std = max(self.train_Y.std().item(), 0.1)
             else:
                 mean = 0.0
                 std = 1.0
             return mean, std
 
+        # Check for NaN/Inf in the input candidate
+        if torch.isnan(X_candidate).any() or torch.isinf(X_candidate).any():
+            print(f"Warning: NaN or Inf detected in X_candidate: {X_candidate}")
+            # Replace with zeros if invalid
+            X_candidate = torch.nan_to_num(X_candidate, nan=0.0, posinf=None, neginf=None)
+
         # Normalise candidate
         X_norm = normalize(X_candidate, self.bounds)
+        
+        # Check for NaN/Inf after normalization
+        if torch.isnan(X_norm).any() or torch.isinf(X_norm).any():
+            print(f"Warning: NaN or Inf detected in X_norm: {X_norm}")
+            # Replace with zeros if invalid
+            X_norm = torch.nan_to_num(X_norm, nan=0.0, posinf=None, neginf=None)
 
         with torch.no_grad(), gpytorch.settings.fast_pred_var():
-            posterior = self.gp_model.posterior(X_norm)
-            mean = posterior.mean.squeeze().item()
-            variance = posterior.variance.squeeze().item()
-            std = math.sqrt(max(variance, 1e-9))
-        print(mean, std)
-        # if mean or std is nan return 0, 1
-        if np.isnan(mean) or np.isnan(std):
-            return -1, -1
+            try:
+                posterior = self.gp_model.posterior(X_norm)
+                mean = posterior.mean.squeeze().item()
+                variance = posterior.variance.squeeze().item()
+                std = math.sqrt(max(variance, 1e-9))
+            except Exception as e:
+                print(f"Error in GP prediction: {e}")
+                # Return fallback values if prediction fails
+                if len(self.train_Y) > 0:
+                    mean = self.train_Y.mean().item()
+                    std = max(self.train_Y.std().item(), 0.1)
+                else:
+                    mean = 0.0
+                    std = 1.0
+                return mean, std
+
+        # Check if results are valid numbers
+        if np.isnan(mean) or np.isnan(std) or np.isinf(mean) or np.isinf(std):
+            print(f"Warning: Invalid prediction result - mean: {mean}, std: {std}")
+            # Return fallback values
+            if len(self.train_Y) > 0:
+                mean = self.train_Y.mean().item()
+                std = max(self.train_Y.std().item(), 0.1)
+            else:
+                mean = 0.0
+                std = 1.0
+            return mean, std
+
         return float(mean), float(std)
 
     def compute_ei(self, X_candidate: torch.Tensor) -> float:
@@ -273,9 +332,33 @@ class DACOptimizer:
         if self.gp_model is None or not self._has_enough_data():
             return 0.0
 
+        # Check for NaN/Inf in the input candidate
+        if torch.isnan(X_candidate).any() or torch.isinf(X_candidate).any():
+            print(f"Warning: NaN or Inf detected in X_candidate for EI computation: {X_candidate}")
+            return 0.0
+
         mean, std = self.compute_prediction(X_candidate)
-        best_f = self.train_Y.max().item()
+        
+        # Validate the computed mean/std values
+        if mean == -1 and std == -1:  # Special flag indicating error in prediction
+            return 0.0
+        
+        # Check if train_Y has valid data
+        if self.train_Y.numel() == 0:
+            return 0.0
+            
+        try:
+            best_f = self.train_Y.max().item()
+            if np.isnan(best_f) or np.isinf(best_f):
+                best_f = 0.0
+        except:
+            best_f = 0.0
+            
         ei = max(0.0, mean - best_f)  # simple EI (no exploration term)
+
+        # Ensure EI is a valid number
+        if np.isnan(ei) or np.isinf(ei):
+            ei = 0.0
 
         return ei
 
@@ -366,12 +449,30 @@ class DACOptimizer:
 
         X_new = torch.tensor(encoded, dtype=torch.float32).unsqueeze(0)  # shape (1, d)
 
+        # Check for NaN or infinite values in X_new
+        if torch.isnan(X_new).any() or torch.isinf(X_new).any():
+            print(f"Warning: Encountered NaN or Inf values in X_new: {X_new}")
+            # Replace NaN with 0 and clamp infinite values
+            X_new = torch.nan_to_num(X_new, nan=0.0, posinf=None, neginf=None)
+
         # --- Compute predictions using current model (before adding new point) ---
         pred_mean, pred_std = self.compute_prediction(X_new)
+        
+        # Check if prediction returned invalid values
+        if pred_mean == -1 and pred_std == -1:
+            pred_mean, pred_std = 0.0, 1.0  # fallback values
+            
         ei = self.compute_ei(X_new)
 
         # --- Update training data ---
         y_new = torch.tensor([[actual]], dtype=torch.float32)
+        
+        # Check for NaN or infinite values in y_new
+        if torch.isnan(y_new).any() or torch.isinf(y_new).any():
+            print(f"Warning: Encountered NaN or Inf values in y_new: {y_new}")
+            # Replace NaN with 0 and clamp infinite values
+            y_new = torch.nan_to_num(y_new, nan=0.0, posinf=None, neginf=None)
+
         if self.train_X.numel() == 0:
             self.train_X = X_new
             self.train_Y = y_new
