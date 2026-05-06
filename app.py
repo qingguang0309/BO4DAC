@@ -4,11 +4,12 @@ import base64
 from io import BytesIO
 from datetime import datetime
 from threading import Lock
+from typing import Generator
 
 import torch
 import numpy as np
 import pandas as pd
-from flask import Flask, request, jsonify, send_file, render_template, session, redirect
+from flask import Flask, request, jsonify, send_file, render_template, session, redirect, Response
 from flask_cors import CORS
 
 # --- Database & Configuration ---
@@ -18,6 +19,9 @@ from encoder import FeatureEncoder
 
 # --- BoTorch Optimisation System ---
 from optimization_system import DACOptimizer
+
+# --- LLM-assisted Suggestions ---
+from llm_service import get_llm_suggestions, stream_llm_suggestions
 
 # --- Visualisation (matplotlib only) ---
 import matplotlib
@@ -894,6 +898,57 @@ def api_record_experiment_full():
         'total_experiments': len(real_exps),
         'total_data_points': total_data_points
     })
+
+@app.route('/api/llm-suggest', methods=['POST'])
+def api_llm_suggest():
+    """Stream LLM-assisted formulation suggestions via SSE."""
+    sid = get_active_session_id()
+    if not sid:
+        return jsonify({'success': False, 'error': 'No active session'}), 400
+
+    data = request.json or {}
+    threshold = float(data.get('threshold', 0.5))
+
+    session_data = db.get_session(sid)
+    if not session_data:
+        return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+    candidates = session_data.get('current_candidates', [])
+    experiments = db.get_experiments_by_session(sid)
+    search_bounds = session_data.get('search_bounds', {})
+    conditions = session_data.get('conditions', {})
+
+    # Compute average uncertainty from current candidates
+    if candidates:
+        uncertainties = [float(c.get('Uncertainty', 0.0)) for c in candidates]
+        avg_uncertainty = sum(uncertainties) / len(uncertainties)
+    else:
+        avg_uncertainty = 0.0
+
+    def generate() -> Generator[str, None, None]:
+        # First event: metadata
+        yield f"event: meta\ndata: {json.dumps({'avg_uncertainty': avg_uncertainty, 'threshold': threshold, 'triggered': avg_uncertainty < threshold})}\n\n"
+
+        # Stream LLM tokens
+        for sse_msg in stream_llm_suggestions(
+            experiments=experiments,
+            search_bounds=search_bounds,
+            conditions=conditions,
+            candidates=candidates,
+            avg_uncertainty=avg_uncertainty,
+        ):
+            yield sse_msg
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive',
+        },
+    )
+
 
 @app.route('/api/generate-chart', methods=['GET'])
 def api_generate_chart():

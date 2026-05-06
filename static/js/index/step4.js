@@ -217,6 +217,10 @@ async function generateCandidates() {
         if (data.success) {
             currentCandidates = data.candidates;
             displayCandidates(data.candidates);
+            // Check if model uncertainty is low and consult LLM
+            if (typeof checkUncertaintyAndSuggest === 'function') {
+                checkUncertaintyAndSuggest(data.candidates);
+            }
             showNotification(`Generated ${data.candidates.length} candidates`, 'success');
         } else {
             showNotification(data.error, 'error');

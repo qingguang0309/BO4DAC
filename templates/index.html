@@ -412,9 +412,72 @@
             </div>
         </div>
     </div>
-</div>
 
-<!-- Modal for Recording Experiment with All Parameters -->
+    <!-- AI-Assisted Suggestions Panel -->
+    <div class="card mt-3" id="llmSuggestPanel" style="display: none;">
+        <div class="card-header d-flex justify-content-between align-items-center" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+            <span><i class="fas fa-robot me-2"></i>AI-Assisted Suggestions</span>
+            <div id="llmStatusBadge"></div>
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <div class="d-flex align-items-center gap-3">
+                        <div>
+                            <strong>Avg Uncertainty:</strong>
+                            <span id="llmAvgUncertainty" class="badge bg-primary ms-1">—</span> mmol/g
+                        </div>
+                        <div>
+                            <strong>Threshold:</strong>
+                            <span id="llmThresholdDisplay" class="badge bg-secondary ms-1">0.50</span> mmol/g
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <label for="llmThresholdInput" class="form-label mb-0 me-2 small">Set:</label>
+                            <input type="number" id="llmThresholdInput" class="form-control form-control-sm"
+                                   value="0.5" step="0.1" min="0.01" max="5.0" style="width: 80px;"
+                                   onchange="updateLLMThreshold(this.value)">
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 text-end">
+                    <button class="btn btn-sm" id="llmSuggestBtn"
+                            style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none;"
+                            onclick="requestLLMSuggestions()">
+                        <i class="fas fa-magic me-1"></i>Get AI Suggestions
+                    </button>
+                </div>
+            </div>
+
+            <!-- Live Streaming Output -->
+            <div id="llmLivePanel" style="display: none;">
+                <div class="border rounded p-2 mb-3" style="background: #1e1e2e;">
+                    <div class="d-flex align-items-center mb-2">
+                        <span class="badge" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);"><i class="fas fa-signal me-1"></i>Live</span>
+                        <small class="text-muted ms-2" id="llmStreamStatus">Streaming AI response...</small>
+                    </div>
+                    <pre id="llmLiveOutput" class="mb-0" style="color: #cdd6f4; font-size: 0.82em; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;"></pre>
+                </div>
+                <!-- Thinking/Reasoning Panel (for models with enable_thinking) -->
+                <div id="llmThinkingPanel" style="display: none;">
+                    <details class="mb-3">
+                        <summary class="small text-muted"><i class="fas fa-brain me-1"></i>AI Reasoning Chain (click to expand)</summary>
+                        <pre id="llmThinkingOutput" class="mt-1 border rounded p-2" style="background: #f8f9fa; font-size: 0.78em; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word; color: #6c757d;"></pre>
+                    </details>
+                </div>
+            </div>
+
+            <!-- Structured Suggestions (shown after streaming completes) -->
+            <div id="llmSuggestionsPanel" style="display: none;">
+                <h6 class="mb-2"><i class="fas fa-list me-1 text-primary"></i>Structured Suggestions</h6>
+                <div id="llmSuggestionsList"></div>
+            </div>
+
+            <div id="llmSuggestionsContainer">
+                <div class="text-center text-muted p-3">Generate candidates to check model uncertainty.</div>
+            </div>
+        </div>
+    </div>
+</div>
 <div class="modal fade" id="recordExperimentModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -527,6 +590,7 @@
 <script src="{{ url_for('static', filename='js/index/step3.js') }}"></script>
 <script src="{{ url_for('static', filename='js/index/step4.js') }}"></script>
 <script src="{{ url_for('static', filename='js/index/experiment-modal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/index/llm-suggest.js') }}"></script>
 <script src="{{ url_for('static', filename='js/index/actions.js') }}"></script>
 <script src="{{ url_for('static', filename='js/index/init.js') }}"></script>
 {% endblock %}
