@@ -1,0 +1,184 @@
+/* Step Navigation */
+.step-navigation {
+    display: flex;
+    justify-content: space-between;
+    margin: 30px 0;
+    position: relative;
+}
+.step-navigation:before {
+    content: '';
+    position: absolute;
+    top: 25px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background-color: #ecf0f1;
+    z-index: 1;
+}
+.step {
+    position: relative;
+    z-index: 2;
+    text-align: center;
+    flex: 1;
+}
+.step-circle {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background-color: white;
+    border: 3px solid #95a5a6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 10px;
+    font-weight: bold;
+    color: #95a5a6;
+    transition: all 0.3s;
+}
+.step.active .step-circle {
+    border-color: #3498db;
+    background-color: #3498db;
+    color: white;
+}
+.step.completed .step-circle {
+    border-color: #27ae60;
+    background-color: #27ae60;
+    color: white;
+}
+.step-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #95a5a6;
+}
+.step.active .step-label { color: #3498db; }
+.step.completed .step-label { color: #27ae60; }
+.step-content { display: none; }
+.step-content.active { display: block; animation: fadeIn 0.5s; }
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Required field indicator */
+.form-label.required::after {
+    content: " *";
+    color: red;
+}
+
+/* Multi-select items - improved for long amine names */
+.multi-select-item {
+    padding: 6px 10px;
+    margin: 3px 0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    font-size: 0.85rem;
+    line-height: 1.2;
+}
+.multi-select-item:hover { background-color: #f8f9fa; }
+.multi-select-item.selected {
+    background-color: #3498db;
+    color: white;
+}
+
+/* Multi-select containers: scrollable with max-height */
+.multi-select-container {
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    padding: 8px;
+    border-radius: 4px;
+}
+
+/* Config badges */
+.config-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    margin: 3px;
+    background-color: #e8f4fc;
+    border: 1px solid #b3dcf9;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.config-badge.selected {
+    background-color: #3498db;
+    color: white;
+}
+
+/* Condition cards */
+.condition-card {
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    cursor: pointer;
+}
+.condition-card.selected {
+    border-color: #3498db;
+    background-color: #e8f4fc;
+}
+
+/* Candidate cards */
+.best-experiment-card { border-left: 4px solid #27ae60; }
+.candidate-card { border-left: 4px solid #3498db; }
+.parameter-item {
+    background: white;
+    padding: 0.75rem;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+}
+
+/* Chart image responsive */
+#optimizationChartImg {
+    max-width: 100%;
+    max-height: 300px;
+    object-fit: contain;
+}
+
+/* Loading overlay */
+#loadingOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.8);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    flex-direction: column;
+}
+.spinner {
+    border: 5px solid #f3f3f3;
+    border-top: 5px solid #3498db;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Notification */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 15px 20px;
+    background-color: #3498db;
+    color: white;
+    border-radius: 5px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    z-index: 10000;
+    display: none;
+}
+.notification.success { background-color: #27ae60; }
+.notification.error { background-color: #e74c3c; }
+.notification.warning { background-color: #f39c12; }
