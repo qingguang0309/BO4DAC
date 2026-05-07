@@ -918,6 +918,21 @@ def api_llm_suggest():
     search_bounds = session_data.get('search_bounds', {})
     conditions = session_data.get('conditions', {})
 
+    # Collect optimizer configuration
+    opt_config = config_manager.config.get('optimization', {})
+    bo = create_bo_system(sid)
+    n_observed = bo.train_X.shape[0] if bo.train_Y.numel() > 0 else 0
+    best_cap = float(bo.train_Y.max().item()) if bo.train_Y.numel() > 0 else 0.0
+    optimization_info = {
+        'model_type': opt_config.get('default_model_type', 'gaussian_process'),
+        'acquisition_function': 'qExpectedImprovement',
+        'n_candidates_sampled': opt_config.get('default_n_candidates', 1000),
+        'exploration_xi': opt_config.get('default_xi', 0.01),
+        'confidence_level': opt_config.get('default_confidence', 0.95),
+        'n_observed_data_points': n_observed,
+        'best_observed_capacity': best_cap,
+    }
+
     # Compute average uncertainty from current candidates
     if candidates:
         uncertainties = [float(c.get('Uncertainty', 0.0)) for c in candidates]
@@ -936,6 +951,7 @@ def api_llm_suggest():
             conditions=conditions,
             candidates=candidates,
             avg_uncertainty=avg_uncertainty,
+            optimization_info=optimization_info,
         ):
             yield sse_msg
 

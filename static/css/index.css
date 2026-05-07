@@ -182,3 +182,15 @@
 .notification.success { background-color: #27ae60; }
 .notification.error { background-color: #e74c3c; }
 .notification.warning { background-color: #f39c12; }
+
+/* LLM Citation Links */
+.citation-link {
+    transition: color 0.15s, background-color 0.15s;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+.citation-link:hover {
+    color: #4a5dc7 !important;
+    background-color: rgba(102, 126, 234, 0.12);
+    text-decoration: underline !important;
+}

@@ -2,6 +2,7 @@
 // LLM-ASSISTED SUGGESTIONS (SSE Streaming)
 // ------------------------------------------------------------
 let llmUncertaintyThreshold = 0.5;
+let llmSearchSources = [];  // populated from search_source SSE event
 
 function checkUncertaintyAndSuggest(candidates) {
     const panel = document.getElementById('llmSuggestPanel');
@@ -47,6 +48,15 @@ async function requestLLMSuggestions() {
     if (livePanel) livePanel.style.display = 'block';
     if (suggestionsPanel) suggestionsPanel.style.display = 'none';
     if (liveOutput) liveOutput.textContent = '';
+
+    // Reset previous search sources and thinking
+    llmSearchSources = [];
+    const prevSourcesPanel = document.getElementById('llmSearchSourcePanel');
+    if (prevSourcesPanel) prevSourcesPanel.style.display = 'none';
+    const thinkPanel = document.getElementById('llmThinkingPanel');
+    if (thinkPanel) thinkPanel.style.display = 'none';
+    const thinkOutput = document.getElementById('llmThinkingOutput');
+    if (thinkOutput) thinkOutput.textContent = '';
 
     // Disable button during request
     const btn = document.getElementById('llmSuggestBtn');
@@ -94,6 +104,29 @@ async function requestLLMSuggestions() {
                             if (avgUncEl && data.avg_uncertainty !== undefined) {
                                 avgUncEl.textContent = data.avg_uncertainty.toFixed(4);
                             }
+                        } else if (currentEvent === 'search_source') {
+                            // Store sources and display citation panel
+                            llmSearchSources = data.sources || [];
+                            const sourcesPanel = document.getElementById('llmSearchSourcePanel');
+                            const sourcesList = document.getElementById('llmSearchSourceList');
+                            if (sourcesPanel && sourcesList && llmSearchSources.length > 0) {
+                                sourcesPanel.style.display = 'block';
+                                let srcHtml = `<div class="d-flex align-items-center mb-2">
+                                    <i class="fas fa-search text-primary me-2"></i>
+                                    <span class="fw-semibold small">Referenced Sources</span>
+                                    <span class="badge bg-primary ms-2">${llmSearchSources.length}</span>
+                                </div>`;
+                                srcHtml += '<ol class="mb-0 ps-3" style="font-size: 0.82em;">';
+                                llmSearchSources.forEach(s => {
+                                    srcHtml += `<li class="mb-1">
+                                        <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
+                                            ${escapeHtml(s.title)} <i class="fas fa-external-link-alt fa-xs ms-1"></i>
+                                        </a>
+                                    </li>`;
+                                });
+                                srcHtml += '</ol>';
+                                sourcesList.innerHTML = srcHtml;
+                            }
                         } else if (currentEvent === 'token') {
                             fullText += data.text || '';
                             if (liveOutput) {
@@ -103,7 +136,7 @@ async function requestLLMSuggestions() {
                             }
                         } else if (currentEvent === 'thinking') {
                             // Show thinking/reasoning tokens in a separate muted area
-                            fullText += data.text || '';
+                            // Note: thinking tokens are NOT added to fullText — they're chain-of-thought, not structured output
                             const thinkEl = document.getElementById('llmThinkingOutput');
                             if (thinkEl) {
                                 thinkEl.textContent += data.text || '';
@@ -167,7 +200,7 @@ function displayLLMSuggestions(suggestions) {
             html += `
                 <div class="list-group-item">
                     <div class="small text-muted">AI Response (unstructured)</div>
-                    <div class="mt-1" style="white-space: pre-wrap; max-height: 200px; overflow-y: auto;">${escapeHtml(s.reasoning || '')}</div>
+                    <div class="mt-1" style="white-space: pre-wrap; max-height: 200px; overflow-y: auto;">${renderCitedReasoning(s.reasoning || '')}</div>
                 </div>
             `;
             return;
@@ -198,7 +231,7 @@ function displayLLMSuggestions(suggestions) {
                     <strong>Pore:</strong> ${s.Average_Bare_Pore_Diameter_nm != null ? parseFloat(s.Average_Bare_Pore_Diameter_nm).toFixed(2) : 'N/A'} nm
                 </p>
                 <div class="mt-1 p-2 bg-light rounded" style="font-size: 0.85em; max-height: 120px; overflow-y: auto;">
-                    <i class="fas fa-brain text-purple me-1"></i><strong>AI Reasoning:</strong> ${escapeHtml(s.reasoning || 'No reasoning provided')}
+                    <i class="fas fa-brain text-purple me-1"></i><strong>AI Reasoning:</strong> ${renderCitedReasoning(s.reasoning || 'No reasoning provided')}
                 </div>
             </div>
         `;
@@ -258,4 +291,22 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function renderCitedReasoning(text) {
+    // First escape, then convert [N] markers into clickable superscript links
+    let html = escapeHtml(text || '');
+    if (llmSearchSources.length > 0) {
+        html = html.replace(/\[(\d+)\]/g, (match, num) => {
+            const idx = parseInt(num);
+            const src = llmSearchSources.find(s => s.index === idx);
+            if (src) {
+                return `<a href="${escapeHtml(src.url)}" target="_blank" rel="noopener noreferrer"
+                    class="citation-link" title="${escapeHtml(src.title)}"
+                    style="color: #667eea; text-decoration: none; font-weight: 600; vertical-align: super; font-size: 0.75em;">[${num}]</a>`;
+            }
+            return match;
+        });
+    }
+    return html;
 }
