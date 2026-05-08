@@ -24,17 +24,17 @@ function checkUncertaintyAndSuggest(candidates) {
     if (avgUncEl) avgUncEl.textContent = avgUnc.toFixed(4);
     if (threshEl) threshEl.textContent = threshold.toFixed(2);
 
-    if (avgUnc < threshold) {
+    if (avgUnc >= threshold) {
         panel.style.display = 'block';
         document.getElementById('llmStatusBadge').innerHTML =
-            '<span class="badge bg-warning text-dark"><i class="fas fa-exclamation-triangle me-1"></i>Low Uncertainty — AI Consultation Recommended</span>';
+            '<span class="badge bg-warning text-dark"><i class="fas fa-exclamation-triangle me-1"></i>High Uncertainty — AI Consultation Recommended</span>';
         requestLLMSuggestions();
     } else {
         panel.style.display = 'block';
         document.getElementById('llmStatusBadge').innerHTML =
-            '<span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Uncertainty Adequate</span>';
+            '<span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Low Uncertainty — Model is Confident</span>';
         document.getElementById('llmSuggestionsContainer').innerHTML =
-            '<div class="text-center text-muted p-3">Model uncertainty is sufficient. Click "Get AI Suggestions" if you want alternative perspectives.</div>';
+            '<div class="text-center text-muted p-3">Model uncertainty is low (confident). Click "Get AI Suggestions" if you want alternative perspectives.</div>';
     }
 }
 
@@ -273,6 +273,18 @@ function useLLMSuggestion(idx) {
     if (betEl) betEl.value = s.BET_Bare_Surface_Area_m2_g || '';
     if (poreEl) poreEl.value = s.Average_Bare_Pore_Diameter_nm || '';
     if (capacityEl) capacityEl.value = '';
+
+    // Set conditions from suggestion or global session conditions
+    const tempEl = document.getElementById('exp-temp-modal');
+    const co2El = document.getElementById('exp-co2-modal');
+    const humidityEl = document.getElementById('exp-humidity-modal');
+    const flowEl = document.getElementById('exp-flow-modal');
+    const testMethodEl = document.getElementById('exp-test-method-modal');
+    if (tempEl) tempEl.value = s.Temperature || (window.conditions && window.conditions.temperature) || 25.0;
+    if (co2El) co2El.value = s.CO2_Concentration || (window.conditions && window.conditions.co2Concentration) || 0.04;
+    if (humidityEl) humidityEl.value = s.Humidity !== undefined ? s.Humidity : (window.conditions && window.conditions.humidity) || 0;
+    if (flowEl) flowEl.value = s.Flow_Rate || (window.conditions && window.conditions.flowRate) || 100.0;
+    if (testMethodEl) testMethodEl.value = s.Test_Method || (window.conditions && window.conditions.testMethod) || 'TGA';
 
     window.originalPredictedCapacity = undefined;
     window.currentCandidateIdx = undefined;

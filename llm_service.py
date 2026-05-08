@@ -70,10 +70,12 @@ def _build_prompt(
     method = conditions.get("testMethod", "TGA")
 
     # --- Experimental data table (with conditions & predictions) ---
+    # Only include experiments that match the session filter (train-only data excluded from LLM prompt)
+    filtered_experiments = [e for e in experiments if e.get('matches_filter', True)]
     header = "| # | Support | Amine1 | Amine2 | OC% | BET | Pore | T(C) | CO2% | RH% | Pred | Actual | Hist? |"
     sep = "|---|---------|--------|--------|-----|-----|------|------|------|-----|------|--------|-------|"
     rows = []
-    for i, exp in enumerate(experiments):
+    for i, exp in enumerate(filtered_experiments):
         c = exp.get("candidate", {})
         cap = exp.get("experimental_performance", 0.0)
         pred = exp.get("predicted_performance", 0.0)
@@ -99,7 +101,7 @@ def _build_prompt(
     # --- Best result ---
     best_cap = 0.0
     best_form = ""
-    for exp in experiments:
+    for exp in filtered_experiments:
         cap = exp.get("experimental_performance", 0.0)
         if cap > best_cap:
             best_cap = cap
@@ -136,7 +138,7 @@ def _build_prompt(
     findings_lines = []
 
     # Top formulations by capacity
-    sorted_exps = sorted(experiments, key=lambda e: e.get("experimental_performance", 0.0), reverse=True)
+    sorted_exps = sorted(filtered_experiments, key=lambda e: e.get("experimental_performance", 0.0), reverse=True)
     if sorted_exps:
         top3 = sorted_exps[:min(3, len(sorted_exps))]
         findings_lines.append("Top-performing formulations:")
@@ -151,7 +153,7 @@ def _build_prompt(
 
     # Tested vs untested combos
     tested_combos = set()
-    for exp in experiments:
+    for exp in filtered_experiments:
         c = exp.get("candidate", {})
         key = (c.get("Support", ""), c.get("Amine_1_or_Additive_1", ""), c.get("Amine_2_or_Additive_2", ""))
         tested_combos.add(key)
@@ -176,7 +178,7 @@ def _build_prompt(
 
     # Prediction bias (Pred vs Actual)
     pred_actual_diffs = []
-    for exp in experiments:
+    for exp in filtered_experiments:
         pred = exp.get("predicted_performance", 0.0)
         actual = exp.get("experimental_performance", 0.0)
         if pred > 0 and actual > 0:
@@ -188,7 +190,7 @@ def _build_prompt(
 
     # Support-specific performance
     support_caps = {}
-    for exp in experiments:
+    for exp in filtered_experiments:
         c = exp.get("candidate", {})
         sp = c.get("Support", "")
         cap = exp.get("experimental_performance", 0.0)
@@ -201,7 +203,7 @@ def _build_prompt(
 
     # Amine efficiency (capacity / OC)
     amine_eff = {}
-    for exp in experiments:
+    for exp in filtered_experiments:
         c = exp.get("candidate", {})
         oc = c.get("Organic_Content_pct", 0)
         cap = exp.get("experimental_performance", 0.0)
@@ -229,12 +231,8 @@ We are optimizing amine-impregnated solid sorbents for CO2 capture using Bayesia
 
 STEP 1 — ANALYZE the experimental data and findings below. Identify key patterns, gaps, and opportunities.
 
-STEP 2 — SEARCH the web for research specifically relevant to the findings. Target your searches based on what the data actually shows, not generic topics. For example:
-- If a specific support (e.g., {best_support}) outperforms, search for WHY and what similar supports might do better
-- If a specific amine (e.g., {best_amine1}) shows high efficiency, search for literature on that amine class for DAC
-- If the GP model has prediction bias, search for known non-linear effects in amine sorbent capacity that GP might miss
-- If certain OC% ranges perform best, search for amine loading optimization studies
-- Search for untested combinations that have literature support
+STEP 2 — SEARCH the web for research specifically relevant to the findings, and sources are based on academic websites. Target your searches based on what the experiment shows, not generic topics. For example:
+Search relevant acdemic articles from current [Search Space] , [Experimental Conditions], [Optimization Configuration], with [Experimental Findings Summary] 
 
 STEP 3 — Suggest 3-5 NOVEL formulations guided by both the data findings and search results.
 

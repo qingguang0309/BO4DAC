@@ -46,7 +46,11 @@ FEATURE_ORDER = [
     'Amine_2_or_Additive_2',
     'Organic_Content_pct',
     'BET_Bare_Surface_Area_m2_g',
-    'Average_Bare_Pore_Diameter_nm'
+    'Average_Bare_Pore_Diameter_nm',
+    'Temperature',
+    'CO2_Concentration',
+    'Humidity',
+    'Flow_Rate'
 ]
 
 # Path to the master historical experiments file
@@ -166,15 +170,56 @@ def create_bo_system(session_id):
         "Average_Bare_Pore_Diameter_nm": (float(pore_range[0]), float(pore_range[1]))
     }
 
+    condition_bounds = {
+        "Temperature": (0.0, 200.0),
+        "CO2_Concentration": (0.0, 100.0),
+        "Humidity": (0.0, 100.0),
+        "Flow_Rate": (0.0, 1000.0),
+    }
+
     bo = DACOptimizer(
         categorical_bounds=categorical_bounds,
         continuous_bounds=continuous_bounds,
-        target_conditions=conditions
+        target_conditions=conditions,
+        condition_bounds=condition_bounds
     )
 
     exps = db.get_experiments_by_session(session_id)
     if not exps:
         return bo
+
+    # Expand the encoder's label encoders with ALL categorical values found
+    # in the historical data (not just the session-bound values), so that
+    # every distinct category gets a unique integer index.
+    from sklearn.preprocessing import LabelEncoder as _LE
+    cat_features = ['Support', 'Amine_1_or_Additive_1', 'Amine_2_or_Additive_2']
+    for cat in cat_features:
+        existing_classes = set()
+        if cat in bo.encoder.label_encoders:
+            existing_classes = set(bo.encoder.label_encoders[cat].classes_)
+        extra_values = set()
+        for exp in exps:
+            val = exp.get('candidate', {}).get(cat)
+            if val is not None and str(val) not in existing_classes:
+                extra_values.add(str(val))
+        if extra_values:
+            all_classes = list(existing_classes) + sorted(extra_values)
+            le = _LE()
+            le.fit(all_classes)
+            bo.encoder.label_encoders[cat] = le
+            # Update the unique lists used for decoding candidates
+            if cat == 'Support':
+                bo.unique_supports = list(le.classes_)
+            elif cat == 'Amine_1_or_Additive_1':
+                bo.unique_amines1 = list(le.classes_)
+            elif cat == 'Amine_2_or_Additive_2':
+                bo.unique_amines2 = list(le.classes_)
+            # Rebuild bounds tensor since categorical max index changed
+            bo.bounds = bo._init_bounds_tensor()
+
+    # Recompute session categorical indices after encoder expansion
+    # (encoder re-fitting may have changed the index mapping)
+    bo._compute_session_indices()
 
     X_list = []
     y_list = []
@@ -182,21 +227,15 @@ def create_bo_system(session_id):
         config = exp.get('candidate', {})
         if not config:
             continue
+        # Merge condition values from experiment record into config for encoding
+        config['Temperature'] = exp.get('Temperature', conditions.get('temperature', 25.0))
+        config['CO2_Concentration'] = exp.get('CO2_Concentration', conditions.get('co2Concentration', 0.04))
+        config['Humidity'] = exp.get('Humidity', conditions.get('humidity', 0.0))
+        config['Flow_Rate'] = exp.get('Flow_Rate', conditions.get('flowRate', 100.0))
         # Ensure all required features are present in the config
         for feature in FEATURE_ORDER:
             if feature not in config:
-                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
-                    # Default values for new parameters - use mid-range values based on current bounds
-                    if feature == 'BET_Bare_Surface_Area_m2_g':
-                        # Use the mid-point of the current BET range if available
-                        bet_range = bo.user_continuous_bounds.get('BET_Bare_Surface_Area_m2_g', (0, 1000))
-                        config[feature] = (bet_range[0] + bet_range[1]) / 2
-                    elif feature == 'Average_Bare_Pore_Diameter_nm':
-                        # Use the mid-point of the current pore range if available
-                        pore_range = bo.user_continuous_bounds.get('Average_Bare_Pore_Diameter_nm', (0, 20))
-                        config[feature] = (pore_range[0] + pore_range[1]) / 2
-                else:
-                    config[feature] = config.get(feature, 0)  # Default for other parameters
+                config[feature] = 0.0
 
         encoded = bo.encoder.encode_candidate(config, feature_order=FEATURE_ORDER)
         if encoded is not None:
@@ -207,11 +246,49 @@ def create_bo_system(session_id):
                 y_list.append(exp.get('experimental_performance', 0.0))
 
     if X_list:
-        bo.train_X = torch.stack(X_list)  # Use torch.stack instead of np.array for consistency
-        bo.train_Y = torch.tensor(np.array(y_list), dtype=torch.float32).unsqueeze(-1)
-        # Fit the GP model with the historical data
-        bo.fit_gp()
-        app.logger.info(f"Fit records f{len(y_list)})")
+        baseline_X = torch.stack(X_list)
+        baseline_Y = torch.tensor(np.array(y_list), dtype=torch.float32).unsqueeze(-1)
+
+        models_dir = 'models'
+        os.makedirs(models_dir, exist_ok=True)
+
+        # Try to load the base pre-trained model
+        base_version = DACOptimizer.find_latest_model(models_dir)
+        model_loaded = False
+        if base_version:
+            model_loaded = bo.load_model(models_dir, version=base_version, baseline_X=baseline_X)
+            if model_loaded:
+                app.logger.info("Loaded base pre-trained model")
+                # Update global encoder + config to point to models/base/
+                base_encoder_path = os.path.join(models_dir, 'base', 'encoder.pkl')
+                if os.path.exists(base_encoder_path):
+                    encoder.load_encoders(base_encoder_path)
+                    config_manager.config['encoders_load_path'] = base_encoder_path
+                    config_manager.save_config()
+                # Set baseline data tensors (for add_experiment later) without re-fitting GP
+                bo.baseline_X = baseline_X.clone()
+                bo.baseline_Y = baseline_Y.clone()
+                bo._rebuild_train_data()
+
+        if not model_loaded:
+            # No base model or data changed — train from scratch and save as base
+            bo.set_baseline(baseline_X, baseline_Y)
+            app.logger.info(f"Baseline set with {len(y_list)} records (trained from scratch)")
+
+            try:
+                bo.save_model(models_dir, version='base')
+                app.logger.info("Saved base pre-trained model")
+                # Update config so next startup finds the encoder in models/base/
+                config_manager.config['encoders_load_path'] = os.path.join(models_dir, 'base', 'encoder.pkl')
+                config_manager.save_config()
+            except Exception as e:
+                app.logger.warning(f"Failed to save base model: {e}")
+
+        # Save a session-specific copy of the model
+        try:
+            bo.save_model(models_dir, version=session_id)
+        except Exception as e:
+            app.logger.warning(f"Failed to save session model: {e}")
 
 
     # Store the newly created BO system in the session cache
@@ -313,22 +390,13 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
     best_exp = None
 
     for idx, row in df.iterrows():
-        # --- Categorical filters ---
+        # --- Read categorical values ---
         support = row.get('Support')
-        if support not in allowed_supports:
-            continue
-
         amine1 = row.get('Amine_1_or_Additive_1')
-        if amine1 not in allowed_amine1:
-            continue
-
-        # Amine 2: CSV uses "0" for "No"
         amine2_raw = row.get('Amine_2_or_Additive_2')
         amine2 = 'No' if amine2_raw == 0 or amine2_raw == '0' or pd.isna(amine2_raw) else str(amine2_raw)
-        if amine2 not in allowed_amine2:
-            continue
 
-        # --- Continuous filters ---
+        # --- Read continuous values (skip row only if essential data is missing) ---
         oc = row.get('Organic_Content_pct')
         bet = row.get('BET_Bare_Surface_Area_m2_g')
         pore = row.get('Average_Bare_Pore_Diameter_nm')
@@ -342,65 +410,67 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             pore = float(pore) if not pd.isna(pore) else 0.0
         except (ValueError, TypeError):
             continue
+
+        # --- Read condition values (use defaults if missing) ---
+        temp = row.get('Adsorption_Temperature_C')
+        co2_conc = row.get('CO2_Concentration_vol_pct')
+        humidity = row.get('Relative_Humidity_pct')
+        flow = row.get('Flow_Rate_mL_min')
+        method = row.get('CO2_Test_Method')
+        try:
+            temp = float(temp) if not pd.isna(temp) else 25.0
+            co2_conc = float(co2_conc) if not pd.isna(co2_conc) else 0.04
+            humidity = float(humidity) if not pd.isna(humidity) else 0.0
+            flow = float(flow) if not pd.isna(flow) else 100.0
+            method = str(method).strip() if not pd.isna(method) else 'TGA'
+        except (ValueError, TypeError):
+            temp = 25.0
+            co2_conc = 0.04
+            humidity = 0.0
+            flow = 100.0
+            method = 'TGA'
+
+        # --- Compute whether this row matches the session filter (for display only) ---
+        # Categorical filters (COMMENTED OUT for training – all data is used to train the model)
+        if support not in allowed_supports:
+            continue
+        if amine1 not in allowed_amine1:
+            continue
+        if amine2 not in allowed_amine2:
+            continue
+        # Continuous range filters (COMMENTED OUT for training)
         if oc < oc_min or oc > oc_max:
             continue
         if bet < bet_min or bet > bet_max:
             continue
         if pore < pore_min or pore > pore_max:
             continue
-
-        # --- Condition filters ---
-        temp = row.get('Adsorption_Temperature_C')
-        co2_conc = row.get('CO2_Concentration_vol_pct')
-        humidity = row.get('Relative_Humidity_pct')
-        flow = row.get('Flow_Rate_mL_min')
-        method = row.get('CO2_Test_Method')
-
-        # Temperature
-        if pd.isna(temp):
-            continue
-        try:
-            temp = float(temp)
-        except (ValueError, TypeError):
-            continue
+        # Condition filters (COMMENTED OUT for training)
         if abs(temp - target_temp) > TEMP_TOL:
-            continue
-
-        # CO₂ concentration
-        if pd.isna(co2_conc):
-            continue
-        try:
-            co2_conc = float(co2_conc)
-        except (ValueError, TypeError):
             continue
         if abs(co2_conc - target_co2) > CO2_TOL:
             continue
-
-        # Humidity
-        if pd.isna(humidity):
-            continue
-        try:
-            humidity = float(humidity)
-        except (ValueError, TypeError):
-            continue
         if abs(humidity - target_humidity) > HUMIDITY_TOL:
-            continue
-
-        # Flow rate
-        if pd.isna(flow):
-            continue
-        try:
-            flow = float(flow)
-        except (ValueError, TypeError):
             continue
         if abs(flow - target_flow) > FLOW_TOL:
             continue
-
-        # Test method – exact match
-        if pd.isna(method):
-            continue
         if method.strip() != target_method:
             continue
+
+        # Check filter match for display purposes (does NOT affect training)
+        matches_filter = (
+            support in allowed_supports and
+            amine1 in allowed_amine1 and
+            amine2 in allowed_amine2 and
+            oc_min <= oc <= oc_max and
+            bet_min <= bet <= bet_max and
+            pore_min <= pore <= pore_max and
+            abs(temp - target_temp) <= TEMP_TOL and
+            abs(co2_conc - target_co2) <= CO2_TOL and
+            abs(humidity - target_humidity) <= HUMIDITY_TOL and
+            abs(flow - target_flow) <= FLOW_TOL and
+            method.strip() == target_method
+        )
 
         # --- Build candidate and experiment ---
         candidate = {
@@ -409,16 +479,17 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             'Amine_2_or_Additive_2': amine2,
             'Organic_Content_pct': oc,
             'BET_Bare_Surface_Area_m2_g': bet,
-            'Average_Bare_Pore_Diameter_nm': pore
+            'Average_Bare_Pore_Diameter_nm': pore,
+            'Temperature': temp,
+            'CO2_Concentration': co2_conc,
+            'Humidity': humidity,
+            'Flow_Rate': flow
         }
 
         # Ensure all required features are present
         for feature in FEATURE_ORDER:
             if feature not in candidate:
-                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
-                    candidate[feature] = 0.0
-                else:
-                    candidate[feature] = 0.0
+                candidate[feature] = 0.0
 
         exp_data = {
             'session_id': session_id,
@@ -427,6 +498,8 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
             'uncertainty': 0.0,
             'experimental_performance': cap,
             'is_historical': True,
+            'source': 'csv',
+            'matches_filter': matches_filter,
             'timestamp': datetime.now().isoformat(),
             'Temperature': temp,
             'Humidity': humidity,
@@ -438,7 +511,8 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
 
         db.add_experiment(session_id, exp_data)
 
-        if cap > best_cap:
+        # Best capacity only counts if the row matches the filter (for display)
+        if matches_filter and cap > best_cap:
             best_cap = cap
             best_exp = candidate
 
@@ -452,7 +526,7 @@ def add_csv_historical_data(session_id, search_bounds, conditions):
                 'best_experiment': best_exp
             })
 
-    print(f"Added rows from historical CSV, {best_cap} best capacity")
+    print(f"Added rows from historical CSV, {best_cap} best capacity (filtered)")
 
 # ----------------------------------------------------------------------
 # API Endpoints – 4‑Step Optimisation Flow
@@ -522,16 +596,17 @@ def api_init():
             'Amine_2_or_Additive_2': rec.get('Amine_2_or_Additive_2', 'No'),
             'Organic_Content_pct': organic_content,
             'BET_Bare_Surface_Area_m2_g': bet_surface_area,
-            'Average_Bare_Pore_Diameter_nm': pore_diameter
+            'Average_Bare_Pore_Diameter_nm': pore_diameter,
+            'Temperature': float(conditions.get('temperature', 25.0)),
+            'CO2_Concentration': float(conditions.get('co2Concentration', 0.04)),
+            'Humidity': float(conditions.get('humidity', 0.0)),
+            'Flow_Rate': float(conditions.get('flowRate', 100.0)),
         }
 
         # Ensure all required features are present
         for feature in FEATURE_ORDER:
             if feature not in candidate:
-                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
-                    candidate[feature] = 0.0
-                else:
-                    candidate[feature] = 0.0
+                candidate[feature] = 0.0
 
         exp_data = {
             'session_id': session_id,
@@ -540,21 +615,28 @@ def api_init():
             'uncertainty': 0.0,
             'experimental_performance': cap,
             'is_historical': True,
+            'source': 'user',
+            'matches_filter': True,  # User-provided records always match the filter
             'timestamp': datetime.now().isoformat()
         }
         db.add_experiment(session_id, exp_data)
 
-    # 2. Automatically add filtered historical records from master CSV
+    # 2. Add ALL historical records from master CSV (filter match is tagged per-row)
     search_bounds = data.get('searchBounds', {})
     conditions = data.get('conditions', {})
     add_csv_historical_data(session_id, search_bounds, conditions)
 
-    # 3. Update session best based on all records now in DB
+    # 3. Update session best based on display-able records only (exclude CSV training data)
     experiments = db.get_experiments_by_session(session_id)
     app.logger.info(f"found {len(experiments)} experiments for session {session_id}")
     best_cap = 0.0
     best_exp = None
     for exp in experiments:
+        # Exclude CSV-sourced records (training-only, not for display)
+        if exp.get('source', 'user') == 'csv':
+            continue
+        if not exp.get('matches_filter', True):
+            continue
         cap = exp.get('experimental_performance', 0.0)
         if cap > best_cap:
             best_cap = cap
@@ -653,13 +735,14 @@ def api_copy_session():
         candidate = exp.get('candidate', {})
         cap = exp.get('experimental_performance', 0.0)
 
-        # Ensure all required features are present
+        # Ensure all required features are present (including conditions from top-level)
+        candidate['Temperature'] = candidate.get('Temperature', exp.get('Temperature', 25.0))
+        candidate['CO2_Concentration'] = candidate.get('CO2_Concentration', exp.get('CO2_Concentration', 0.04))
+        candidate['Humidity'] = candidate.get('Humidity', exp.get('Humidity', 0.0))
+        candidate['Flow_Rate'] = candidate.get('Flow_Rate', exp.get('Flow_Rate', 100.0))
         for feature in FEATURE_ORDER:
             if feature not in candidate:
-                if feature in ['BET_Bare_Surface_Area_m2_g', 'Average_Bare_Pore_Diameter_nm']:
-                    candidate[feature] = 0.0
-                else:
-                    candidate[feature] = 0.0
+                candidate[feature] = 0.0
 
         exp_data = {
             'session_id': new_session_id,
@@ -668,6 +751,8 @@ def api_copy_session():
             'uncertainty': exp.get('uncertainty', 0.0),
             'experimental_performance': cap,
             'is_historical': exp.get('is_historical', False),  # Preserve original is_historical flag
+            'source': exp.get('source', 'user'),  # Preserve original source
+            'matches_filter': exp.get('matches_filter', True),  # Preserve original matches_filter flag
             'original_timestamp': exp.get('timestamp', datetime.now().isoformat()),  # Preserve original timestamp
             'timestamp': datetime.now().isoformat(),  # New timestamp for the copy
             'Temperature': exp.get('Temperature', 25.0),
@@ -679,11 +764,15 @@ def api_copy_session():
         }
         db.add_experiment(new_session_id, exp_data)
 
-    # Update session best based on all records (both historical and real)
+    # Update session best based on display-able records (exclude CSV training data)
     experiments = db.get_experiments_by_session(new_session_id)
     best_cap = 0.0
     best_exp = None
     for exp in experiments:
+        if exp.get('source', 'user') == 'csv':
+            continue
+        if not exp.get('matches_filter', True):
+            continue
         cap = exp.get('experimental_performance', 0.0)
         if cap > best_cap:
             best_cap = cap
@@ -764,8 +853,15 @@ def api_record_experiment():
         'uncertainty': candidate.get('Uncertainty', 0.0),  # Original uncertainty from when candidate was generated
         'experimental_performance': actual_capacity,
         'is_historical': False,
+        'source': 'real',
+        'matches_filter': True,  # User-recorded experiments always match the filter
         'notes': notes,
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'Temperature': candidate.get('Temperature', 25.0),
+        'Humidity': candidate.get('Humidity', 0.0),
+        'CO2_Concentration': candidate.get('CO2_Concentration', 0.04),
+        'Flow_Rate': candidate.get('Flow_Rate', 100.0),
+        'Test_Method': candidate.get('Test_Method', 'TGA'),
     }
     db.add_experiment(sid, exp_data)
 
@@ -779,8 +875,17 @@ def api_record_experiment():
 
     # Update the existing BO system with the new experimental result
     bo = create_bo_system(sid)  # This will get the existing BO system or create a new one
-    bo.add_experiment({
+    # Ensure condition features are present for encoding
+    sess_conditions = db.get_session(sid).get('conditions', {})
+    bo_candidate = {
         **candidate,
+        'Temperature': candidate.get('Temperature', float(sess_conditions.get('temperature', 25.0))),
+        'CO2_Concentration': candidate.get('CO2_Concentration', float(sess_conditions.get('co2Concentration', 0.04))),
+        'Humidity': candidate.get('Humidity', float(sess_conditions.get('humidity', 0.0))),
+        'Flow_Rate': candidate.get('Flow_Rate', float(sess_conditions.get('flowRate', 100.0))),
+    }
+    bo.add_experiment({
+        **bo_candidate,
         'actual_capacity': actual_capacity
     })
 
@@ -851,8 +956,17 @@ def api_record_experiment_full():
 
     # Update the existing BO system with the new experimental result
     bo = create_bo_system(sid)  # This will get the existing BO system or create a new one
-    bo.add_experiment({
+    # Ensure condition features are present for encoding
+    sess_conditions = db.get_session(sid).get('conditions', {})
+    bo_candidate = {
         **candidate,
+        'Temperature': candidate.get('Temperature', float(sess_conditions.get('temperature', 25.0))),
+        'CO2_Concentration': candidate.get('CO2_Concentration', float(sess_conditions.get('co2Concentration', 0.04))),
+        'Humidity': candidate.get('Humidity', float(sess_conditions.get('humidity', 0.0))),
+        'Flow_Rate': candidate.get('Flow_Rate', float(sess_conditions.get('flowRate', 100.0))),
+    }
+    bo.add_experiment({
+        **bo_candidate,
         'actual_capacity': actual_capacity
     })
 
@@ -868,6 +982,8 @@ def api_record_experiment_full():
         'uncertainty': recalculated_uncertainty,  # Recalculated using updated BO model
         'experimental_performance': actual_capacity,
         'is_historical': False,
+        'source': 'real',
+        'matches_filter': True,  # User-recorded experiments always match the filter
         'notes': notes,
         'timestamp': datetime.now().isoformat(),
         # Include experimental conditions from candidate if available
@@ -915,6 +1031,9 @@ def api_llm_suggest():
 
     candidates = session_data.get('current_candidates', [])
     experiments = db.get_experiments_by_session(sid)
+    # Only pass display-able experiments to LLM (CSV training data excluded)
+    experiments = [e for e in experiments
+                   if e.get('matches_filter', True) and e.get('source', 'user') != 'csv']
     search_bounds = session_data.get('search_bounds', {})
     conditions = session_data.get('conditions', {})
 
@@ -942,7 +1061,7 @@ def api_llm_suggest():
 
     def generate() -> Generator[str, None, None]:
         # First event: metadata
-        yield f"event: meta\ndata: {json.dumps({'avg_uncertainty': avg_uncertainty, 'threshold': threshold, 'triggered': avg_uncertainty < threshold})}\n\n"
+        yield f"event: meta\ndata: {json.dumps({'avg_uncertainty': avg_uncertainty, 'threshold': threshold, 'triggered': avg_uncertainty >= threshold})}\n\n"
 
         # Stream LLM tokens
         for sse_msg in stream_llm_suggestions(
@@ -981,8 +1100,12 @@ def api_generate_chart():
                 verticalalignment='center', transform=ax.transAxes, fontsize=14)
         ax.set_title('Optimization Progress')
     else:
-        # Sort all experiments chronologically
-        sorted_exps = sorted(experiments, key=lambda x: x.get('timestamp', ''))
+        # Sort display-able experiments chronologically (CSV training data excluded from chart)
+        sorted_exps = sorted(
+            [e for e in experiments
+             if e.get('matches_filter', True) and e.get('source', 'user') != 'csv'],
+            key=lambda x: x.get('timestamp', '')
+        )
         iterations = list(range(1, len(sorted_exps) + 1))
 
         actual_all = []
@@ -1095,13 +1218,19 @@ def api_get_status():
 
     session_data = db.get_session(sid)
     experiments = db.get_experiments_by_session(sid)
-    real_count = len([e for e in experiments if not e.get('is_historical', False)])
-    total_data_points = len(experiments)
+    # CSV-sourced records are training-only, exclude from display
+    display_exps = [e for e in experiments if e.get('source', 'user') != 'csv']
+    real_count = len([e for e in display_exps if not e.get('is_historical', False)])
+    historical_count = len([e for e in display_exps if e.get('is_historical', False)])
+    total_data_points = len(display_exps)
+    filtered_data_points = len([e for e in display_exps if e.get('matches_filter', True)])
 
-    # Calculate best capacity from the experiments directly, without creating BO system
+    # Calculate best capacity from display-able experiments (excludes CSV training data)
     best_cap = 0.0
     best_experiment = session_data.get('best_experiment')
-    for exp in experiments:
+    for exp in display_exps:
+        if not exp.get('matches_filter', True):
+            continue
         exp_capacity = exp.get('experimental_performance', 0.0)
         if exp_capacity > best_cap:
             best_cap = exp_capacity
@@ -1115,6 +1244,8 @@ def api_get_status():
         'best_experiment': best_experiment,
         'total_experiments': real_count,
         'total_data_points': total_data_points,
+        'historical_records': historical_count,
+        'filtered_data_points': filtered_data_points,
         'conditions': session_data.get('conditions', {}),
         'search_bounds': session_data.get('search_bounds', {})
     })
@@ -1143,7 +1274,9 @@ def db_get_session(session_id):
     if not sess:
         return jsonify({'success': False, 'message': 'Session not found'}), 404
     exps = db.get_experiments_by_session(session_id)
-    sess['experiments'] = exps
+    # Exclude CSV-sourced training data from display
+    display_exps = [e for e in exps if e.get('source', 'user') != 'csv']
+    sess['experiments'] = display_exps
     return jsonify({'success': True, 'session': sess})
 
 @app.route('/db/experiments', methods=['GET'])
@@ -1153,7 +1286,9 @@ def db_get_experiments():
         exps = db.get_experiments_by_session(session_id)
     else:
         exps = db.get_all_experiments()
-    return jsonify({'success': True, 'experiments': exps, 'count': len(exps)})
+    # Exclude CSV-sourced training data from display
+    display_exps = [e for e in exps if e.get('source', 'user') != 'csv']
+    return jsonify({'success': True, 'experiments': display_exps, 'count': len(display_exps)})
 
 
 @app.route('/db/export/csv', methods=['GET'])
@@ -1414,8 +1549,14 @@ if __name__ == '__main__':
     os.makedirs('data/export', exist_ok=True)
     os.makedirs('config', exist_ok=True)
     os.makedirs('encoders', exist_ok=True)
+    os.makedirs('models', exist_ok=True)
 
     encoder_path = config_manager.config.get('encoders_load_path', 'encoders/label_encoders.pkl') if config_manager.config else 'encoders/label_encoders.pkl'
+    if not os.path.exists(encoder_path):
+        # Fall back to the encoder saved alongside the base model
+        base_encoder = os.path.join('models', 'base', 'encoder.pkl')
+        if os.path.exists(base_encoder):
+            encoder_path = base_encoder
     if os.path.exists(encoder_path):
         encoder.load_encoders(encoder_path)
 

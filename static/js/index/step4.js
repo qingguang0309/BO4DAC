@@ -14,6 +14,8 @@ async function loadSystemStatus() {
             document.getElementById('iterationCount').innerText = data.iteration;
             document.getElementById('realExperiments').innerText = data.total_experiments;
             document.getElementById('dataPoints').innerText = data.total_data_points;
+            const histCount = data.historical_records || (data.total_data_points - data.total_experiments);
+            document.getElementById('dataPoints').title = `Historical: ${histCount} + Real: ${data.total_experiments}`;
 
             // Update conditions display
             const conditions = data.conditions || {};
@@ -217,7 +219,7 @@ async function generateCandidates() {
         if (data.success) {
             currentCandidates = data.candidates;
             displayCandidates(data.candidates);
-            // Check if model uncertainty is low and consult LLM
+            // Check if model uncertainty is high and consult LLM
             if (typeof checkUncertaintyAndSuggest === 'function') {
                 checkUncertaintyAndSuggest(data.candidates);
             }

@@ -19,6 +19,13 @@ function openRecordModal(idx) {
     document.getElementById('exp-pore-modal').value = cand.Average_Bare_Pore_Diameter_nm || '';
     document.getElementById('exp-capacity-modal').value = cand.Predicted_CO2_Capacity_mmol_g.toFixed(3) || '';
 
+    // Set conditions from candidate or global conditions
+    document.getElementById('exp-temp-modal').value = cand.Temperature || (window.conditions && window.conditions.temperature) || 25.0;
+    document.getElementById('exp-co2-modal').value = cand.CO2_Concentration || (window.conditions && window.conditions.co2Concentration) || 0.04;
+    document.getElementById('exp-humidity-modal').value = cand.Humidity !== undefined ? cand.Humidity : (window.conditions && window.conditions.humidity) || 0;
+    document.getElementById('exp-flow-modal').value = cand.Flow_Rate || (window.conditions && window.conditions.flowRate) || 100.0;
+    document.getElementById('exp-test-method-modal').value = cand.Test_Method || (window.conditions && window.conditions.testMethod) || 'TGA';
+
     // Store the original predicted capacity and candidate to preserve it when submitting
     window.originalPredictedCapacity = cand.Predicted_CO2_Capacity_mmol_g || 0.0;
     window.currentCandidateIdx = idx;
@@ -260,7 +267,7 @@ function submitExperimentFromModal() {
         'CO2_Concentration': co2El && co2El.value ? parseFloat(co2El.value) : 0.04,
         'Humidity': humidityEl && humidityEl.value ? parseFloat(humidityEl.value) : 0,
         'Flow_Rate': flowEl && flowEl.value ? parseFloat(flowEl.value) : 100.0,
-        'Test_Method': testMethodEl ? testMethodEl.value : 'TGA',
+        'Test_Method': (testMethodEl && testMethodEl.value) ? testMethodEl.value : ((window.conditions && window.conditions.testMethod) || 'TGA'),
         'Notes': notes
     };
 

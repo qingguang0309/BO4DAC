@@ -31,12 +31,83 @@ class ExperimentDatabase:
             self._save_json(self.configs_file, {})
 
     def _load_json(self, filepath: Path) -> Any:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError):
+            # Corrupted file — attempt recovery
+            print(f"Warning: Corrupted JSON in {filepath}, attempting recovery...")
+            backup_path = filepath.with_suffix('.json.bak')
+            try:
+                filepath.rename(backup_path)
+            except OSError:
+                pass
+            with open(backup_path, 'r', encoding='utf-8') as f:
+                raw = f.read()
+
+            # For a truncated array file, find the last '}' and close with ']'
+            if raw.lstrip().startswith('['):
+                last_brace = raw.rfind('}')
+                if last_brace > 0:
+                    truncated = raw[:last_brace + 1] + ']'
+                    try:
+                        data = json.loads(truncated)
+                        print(f"Recovered {len(data)} records from corrupted {filepath.name}")
+                        # Save the repaired file
+                        self._save_json(filepath, data)
+                        return data
+                    except json.JSONDecodeError:
+                        pass
+
+            # For a truncated object file, find the last '}' and close with '}'
+            if raw.lstrip().startswith('{'):
+                last_brace = raw.rfind('}')
+                if last_brace > 0:
+                    truncated = raw[:last_brace + 1] + '}'
+                    try:
+                        data = json.loads(truncated)
+                        print(f"Recovered data from corrupted {filepath.name}")
+                        self._save_json(filepath, data)
+                        return data
+                    except json.JSONDecodeError:
+                        pass
+
+            # Unrecoverable — start fresh
+            print(f"Warning: Could not repair {filepath.name}, starting with empty data")
+            empty = [] if filepath in (self.experiments_file, self.materials_file) else {}
+            self._save_json(filepath, empty)
+            return empty
+
+    def _sanitize_for_json(self, obj):
+        """Recursively replace NaN/Inf floats with None so json.dump produces valid JSON."""
+        if isinstance(obj, float):
+            if np.isnan(obj) or np.isinf(obj):
+                return None
+            return obj
+        if isinstance(obj, (np.floating, np.float32, np.float64)):
+            if np.isnan(obj) or np.isinf(obj):
+                return None
+            return float(obj)
+        if isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        if isinstance(obj, np.ndarray):
+            return self._sanitize_for_json(obj.tolist())
+        if isinstance(obj, dict):
+            return {k: self._sanitize_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._sanitize_for_json(v) for v in obj]
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if obj is pd.NA or (isinstance(obj, float) and pd.isna(obj)):
+            return None
+        return obj
 
     def _save_json(self, filepath: Path, data: Any):
+        sanitized = self._sanitize_for_json(data)
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False, default=self._json_serializer)
+            json.dump(sanitized, f, indent=2, ensure_ascii=False, allow_nan=False)
 
     def _json_serializer(self, obj):
         # Handle NaN, Infinity, -Infinity

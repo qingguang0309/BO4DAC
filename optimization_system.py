@@ -1,4 +1,9 @@
 import math
+import os
+import json
+import hashlib
+import pickle
+from datetime import datetime
 
 import pandas as pd
 import torch
@@ -13,6 +18,7 @@ import gpytorch
 from gpytorch.mlls import ExactMarginalLogLikelihood
 from typing import List, Dict, Optional, Any, Tuple
 import warnings
+from sklearn.preprocessing import LabelEncoder
 
 warnings.filterwarnings('ignore')
 
@@ -67,35 +73,74 @@ class DACOptimizer:
         'Amine_2_or_Additive_2',
         'Organic_Content_pct',
         'BET_Bare_Surface_Area_m2_g',
-        'Average_Bare_Pore_Diameter_nm'
+        'Average_Bare_Pore_Diameter_nm',
+        'Temperature',
+        'CO2_Concentration',
+        'Humidity',
+        'Flow_Rate'
     ]
     # Indices for categorical / continuous features (0‑based)
     CATEGORICAL_DIMS = [0, 1, 2]
-    CONTINUOUS_DIMS = [3, 4, 5]
+    CONTINUOUS_DIMS = [3, 4, 5, 6, 7, 8, 9]
     Q_VALUES = 10
     def __init__(self,
                  categorical_bounds: Dict[str, List[str]],
                  continuous_bounds: Dict[str, tuple[float, float]],
-                 target_conditions: Optional[Dict] = None) -> None:
+                 target_conditions: Optional[Dict] = None,
+                 condition_bounds: Optional[Dict[str, tuple[float, float]]] = None) -> None:
         """
         Args:
             categorical_bounds: Maps each categorical feature name to list of allowed values.
             continuous_bounds: Maps each continuous feature name to (min, max).
-            target_conditions: Optional target constraints (not used in base BO).
+            target_conditions: Target experimental conditions for candidate generation.
+            condition_bounds: Maps condition feature names to (min, max) for model bounds.
         """
         self.encoder = FeatureEncoder(feature_names=self.FEATURE_NAMES)
         self.categorical_bounds = categorical_bounds
         self.continuous_bounds = continuous_bounds
         self.target_conditions = target_conditions or {}
+        self.condition_bounds = condition_bounds or {
+            'Temperature': (0.0, 200.0),
+            'CO2_Concentration': (0.0, 100.0),
+            'Humidity': (0.0, 100.0),
+            'Flow_Rate': (0.0, 1000.0),
+        }
+
+        # Fit label encoders from categorical bounds so encode_candidate maps
+        # strings to proper integer indices (0, 1, 2, ...)
+        for cat_name, cat_values in categorical_bounds.items():
+            if cat_values:
+                le = LabelEncoder()
+                le.fit([str(v) for v in cat_values])
+                self.encoder.label_encoders[cat_name] = le
+
+        # Unique category lists MUST come from the fitted LabelEncoder classes
+        # to ensure encode/decode consistency (LabelEncoder sorts alphabetically,
+        # so index 0 in le.classes_ is the same string that encodes to 0)
+        self.unique_supports = list(self.encoder.label_encoders['Support'].classes_) if 'Support' in self.encoder.label_encoders else categorical_bounds.get('Support', ['SBA-15'])
+        self.unique_amines1 = list(self.encoder.label_encoders['Amine_1_or_Additive_1'].classes_) if 'Amine_1_or_Additive_1' in self.encoder.label_encoders else categorical_bounds.get('Amine_1_or_Additive_1', ['No'])
+        self.unique_amines2 = list(self.encoder.label_encoders['Amine_2_or_Additive_2'].classes_) if 'Amine_2_or_Additive_2' in self.encoder.label_encoders else categorical_bounds.get('Amine_2_or_Additive_2', ['No'])
+
+        # Session categorical bounds: which materials the user selected for candidate generation
+        # (may be a subset of unique_supports/amines if encoder was expanded with historical data)
+        self.session_categorical_values = {
+            'Support': categorical_bounds.get('Support', []),
+            'Amine_1_or_Additive_1': categorical_bounds.get('Amine_1_or_Additive_1', []),
+            'Amine_2_or_Additive_2': categorical_bounds.get('Amine_2_or_Additive_2', []),
+        }
+        self.session_categorical_indices = {}
+        self._compute_session_indices()
 
         # Training data (tensors)
+        # baseline: pre-trained on historical data, set once via set_baseline()
+        self.baseline_X = torch.tensor([])
+        self.baseline_Y = torch.tensor([])
+        # new: experiment data accumulated during optimization
+        self.new_X = torch.tensor([])
+        self.new_Y = torch.tensor([])
+        # train: concatenation of baseline + new (used for GP fitting)
         self.train_X = torch.tensor([])  # encoded points
         self.train_Y = torch.tensor([])  # observed values
-
-        # Unique category lists (for decoding and bound clamping)
-        self.unique_supports = categorical_bounds.get('Support', ['SBA-15'])
-        self.unique_amines1 = categorical_bounds.get('Amine_1_or_Additive_1', ['No'])
-        self.unique_amines2 = categorical_bounds.get('Amine_2_or_Additive_2', ['No'])
 
         # Build optimisation bounds tensor
         self.bounds = self._init_bounds_tensor()
@@ -103,6 +148,7 @@ class DACOptimizer:
         # GP Model (initialized as None, will be created when data available)
         self.gp_model = None
         self.mll = None
+        self._model_version = None
 
         # History tracker
         self.history = History()
@@ -119,6 +165,12 @@ class DACOptimizer:
         bet_min, bet_max = self.continuous_bounds.get('BET_Bare_Surface_Area_m2_g', (0, 1000))
         pore_min, pore_max = self.continuous_bounds.get('Average_Bare_Pore_Diameter_nm', (0, 20))
 
+        # Condition bounds with safe fallback
+        temp_min, temp_max = self.condition_bounds.get('Temperature', (0, 200))
+        co2_min, co2_max = self.condition_bounds.get('CO2_Concentration', (0, 100))
+        hum_min, hum_max = self.condition_bounds.get('Humidity', (0, 100))
+        flow_min, flow_max = self.condition_bounds.get('Flow_Rate', (0, 1000))
+
         # Avoid zero‑range bounds
         if oc_max <= oc_min:
             oc_max = oc_min + 10
@@ -126,23 +178,92 @@ class DACOptimizer:
             bet_max = bet_min + 100
         if pore_max <= pore_min:
             pore_max = pore_min + 5
+        if temp_max <= temp_min:
+            temp_max = temp_min + 10
+        if co2_max <= co2_min:
+            co2_max = co2_min + 1
+        if hum_max <= hum_min:
+            hum_max = hum_min + 10
+        if flow_max <= flow_min:
+            flow_max = flow_min + 10
 
         lower = torch.tensor([
             0.0, 0.0, 0.0,
-            oc_min, bet_min, pore_min
+            oc_min, bet_min, pore_min,
+            temp_min, co2_min, hum_min, flow_min
         ], dtype=torch.float32)
         upper = torch.tensor([
             max(0.0, n_supports - 1.0),
             max(0.0, n_amines1 - 1.0),
             max(0.0, n_amines2 - 1.0),
-            oc_max, bet_max, pore_max
+            oc_max, bet_max, pore_max,
+            temp_max, co2_max, hum_max, flow_max
         ], dtype=torch.float32)
         return torch.stack([lower, upper])
 
-    def _has_enough_data(self, min_points: int = 3) -> bool:
-        """Check if we have at least `min_points` observations."""
-        return len(self.train_X) >= min_points
+    # ------------------------------------------------------------------
+    # Session bounds: restrict candidate generation to user-selected materials
+    # ------------------------------------------------------------------
 
+    def _compute_session_indices(self) -> None:
+        """Compute encoder indices for session-selected categorical values."""
+        cat_dim_names = {0: 'Support', 1: 'Amine_1_or_Additive_1', 2: 'Amine_2_or_Additive_2'}
+        self.session_categorical_indices = {}
+        for dim, cat_name in cat_dim_names.items():
+            cat_values = self.session_categorical_values.get(cat_name, [])
+            if cat_name in self.encoder.label_encoders and cat_values:
+                le = self.encoder.label_encoders[cat_name]
+                indices = set()
+                for v in cat_values:
+                    sv = str(v)
+                    if sv in le.classes_:
+                        indices.add(int(le.transform([sv])[0]))
+                self.session_categorical_indices[cat_name] = indices
+            else:
+                self.session_categorical_indices[cat_name] = set()
+
+    def _is_within_session_bounds(self, X: torch.Tensor) -> bool:
+        """Check if a single encoded point's categorical dims are within session bounds."""
+        if X.dim() == 2:
+            X = X.squeeze(0)
+        cat_dim_names = {0: 'Support', 1: 'Amine_1_or_Additive_1', 2: 'Amine_2_or_Additive_2'}
+        for dim, cat_name in cat_dim_names.items():
+            allowed = self.session_categorical_indices.get(cat_name, set())
+            if not allowed:
+                continue
+            idx = int(torch.round(X[dim]).item())
+            if idx not in allowed:
+                return False
+        return True
+
+    def _random_session_candidates(self, n: int) -> torch.Tensor:
+        """Generate n random candidates with categorical dims restricted to session-selected values."""
+        d = self.bounds.shape[1]
+        candidates = torch.zeros(n, d, dtype=torch.float32)
+
+        cat_dim_names = {0: 'Support', 1: 'Amine_1_or_Additive_1', 2: 'Amine_2_or_Additive_2'}
+        for i in range(n):
+            # Categorical dims: pick random index from session-allowed set
+            for dim, cat_name in cat_dim_names.items():
+                allowed = self.session_categorical_indices.get(cat_name, set())
+                if allowed:
+                    candidates[i, dim] = float(np.random.choice(list(allowed)))
+                else:
+                    candidates[i, dim] = 0.0
+            # Continuous dims: sample uniformly within bounds
+            for dim in self.CONTINUOUS_DIMS:
+                lo, hi = self.bounds[0, dim].item(), self.bounds[1, dim].item()
+                candidates[i, dim] = np.random.uniform(lo, hi)
+
+        candidates = self._pin_conditions_to_target(candidates)
+        return candidates
+
+    def _has_enough_data(self, min_points: int = 0) -> bool:
+        """Check if we have at least `min_points` observations."""
+        if min_points == 0:
+            return self.train_X.numel() > 0 and self.train_X.shape[0] >= min_points
+        else:
+            return self.train_X.numel() > 0
     def _round_categorical(self, X: torch.Tensor) -> torch.Tensor:
         """Round and clamp categorical dimensions to valid integer indices."""
         X_rounded = X.clone()
@@ -158,7 +279,9 @@ class DACOptimizer:
     def _decode_config(self, X: torch.Tensor) -> Dict[str, Any]:
         """
         Convert a single encoded point (1‑D tensor) into a configuration dict.
-        Assumes X is already within bounds.
+        Assumes X is already within bounds. Condition features are pinned to
+        the target_conditions values so candidates are generated at the target
+        experimental conditions.
         """
         if X.dim() == 2:
             X = X.squeeze(0)
@@ -175,7 +298,7 @@ class DACOptimizer:
             'BET_Bare_Surface_Area_m2_g': float(X[4].item()),
             'Average_Bare_Pore_Diameter_nm': float(X[5].item())
         }
-        # Clamp continuous values to bounds (already done by generation, but safe)
+        # Clamp continuous values to bounds
         config['Organic_Content_pct'] = max(self.bounds[0, 3].item(),
                                             min(self.bounds[1, 3].item(), config['Organic_Content_pct']))
         config['BET_Bare_Surface_Area_m2_g'] = max(self.bounds[0, 4].item(),
@@ -187,13 +310,99 @@ class DACOptimizer:
         config['Organic_Content_pct'] = round(config['Organic_Content_pct'], 1)
         config['BET_Bare_Surface_Area_m2_g'] = round(config['BET_Bare_Surface_Area_m2_g'], 2)
         config['Average_Bare_Pore_Diameter_nm'] = round(config['Average_Bare_Pore_Diameter_nm'], 2)
+
+        # Pin condition features to target values (candidates are generated at target conditions)
+        config['Temperature'] = float(self.target_conditions.get('temperature', 25.0))
+        config['CO2_Concentration'] = float(self.target_conditions.get('co2Concentration', 0.04))
+        config['Humidity'] = float(self.target_conditions.get('humidity', 0.0))
+        config['Flow_Rate'] = float(self.target_conditions.get('flowRate', 100.0))
+        config['Test_Method'] = self.target_conditions.get('testMethod', 'TGA')
         return config
 
+    def _pin_conditions_to_target(self, X: torch.Tensor) -> torch.Tensor:
+        """Pin condition dimensions (6-9) to the encoded target condition values."""
+        X_pinned = X.clone()
+        temp = float(self.target_conditions.get('temperature', 25.0))
+        co2 = float(self.target_conditions.get('co2Concentration', 0.04))
+        hum = float(self.target_conditions.get('humidity', 0.0))
+        flow = float(self.target_conditions.get('flowRate', 100.0))
+        # Clamp to bounds
+        temp = max(self.bounds[0, 6].item(), min(self.bounds[1, 6].item(), temp))
+        co2 = max(self.bounds[0, 7].item(), min(self.bounds[1, 7].item(), co2))
+        hum = max(self.bounds[0, 8].item(), min(self.bounds[1, 8].item(), hum))
+        flow = max(self.bounds[0, 9].item(), min(self.bounds[1, 9].item(), flow))
+        X_pinned[..., 6] = temp
+        X_pinned[..., 7] = co2
+        X_pinned[..., 8] = hum
+        X_pinned[..., 9] = flow
+        return X_pinned
+
+    def _rebuild_train_data(self) -> None:
+        """Rebuild train_X/Y by concatenating baseline + new experiment data."""
+        parts_X, parts_Y = [], []
+        if self.baseline_X.numel() > 0:
+            parts_X.append(self.baseline_X)
+            parts_Y.append(self.baseline_Y)
+        if self.new_X.numel() > 0:
+            parts_X.append(self.new_X)
+            parts_Y.append(self.new_Y)
+        if parts_X:
+            self.train_X = torch.cat(parts_X, dim=0)
+            self.train_Y = torch.cat(parts_Y, dim=0)
+        else:
+            self.train_X = torch.tensor([])
+            self.train_Y = torch.tensor([])
+
+    def set_baseline(self, X: torch.Tensor, Y: torch.Tensor) -> None:
+        """
+        Set the baseline training data (historical records) and fit the GP.
+
+        This is called once at session initialization with all historical data.
+        The baseline is preserved across subsequent add_experiment() calls.
+
+        Args:
+            X: Encoded feature tensor of shape (n, d).
+            Y: Observed capacity tensor of shape (n, 1).
+        """
+        if X.numel() == 0:
+            return
+        if Y.dim() == 1:
+            Y = Y.unsqueeze(-1)
+        self.baseline_X = X.clone()
+        self.baseline_Y = Y.clone()
+        self._rebuild_train_data()
+        self.fit_gp()
+
+    def add_new_experiment(self, X: torch.Tensor, Y: torch.Tensor) -> None:
+        """
+        Append a new experiment point (accumulated during optimization).
+
+        Does NOT touch baseline data. Rebuilds train_X/Y and refits the GP.
+
+        Args:
+            X: Encoded feature tensor of shape (1, d).
+            Y: Observed capacity tensor of shape (1, 1).
+        """
+        if X.dim() == 1:
+            X = X.unsqueeze(0)
+        if Y.dim() == 1:
+            Y = Y.unsqueeze(-1)
+        if self.new_X.numel() == 0:
+            self.new_X = X
+            self.new_Y = Y
+        else:
+            self.new_X = torch.cat([self.new_X, X], dim=0)
+            self.new_Y = torch.cat([self.new_Y, Y], dim=0)
+        self._rebuild_train_data()
+        self.fit_gp()
+
     def _random_candidates(self, n: int) -> torch.Tensor:
-        """Generate `n` random points uniformly in the bounds."""
+        """Generate `n` random points uniformly in the bounds, with conditions pinned to target."""
         rand = torch.rand(n, self.bounds.shape[1], dtype=torch.float32)
         candidates = rand * (self.bounds[1] - self.bounds[0]) + self.bounds[0]
-        return self._round_categorical(candidates)
+        candidates = self._round_categorical(candidates)
+        candidates = self._pin_conditions_to_target(candidates)
+        return candidates
 
     def fit_gp(self) -> None:
         """
@@ -205,24 +414,28 @@ class DACOptimizer:
             self.mll = None
             return
 
+        # Work on copies to avoid mutating the source data
+        train_X = self.train_X.clone()
+        train_Y_arr = self.train_Y.clone()
+
         # Check for and clean NaN/infinite values in training data
-        if torch.isnan(self.train_X).any() or torch.isinf(self.train_X).any():
+        if torch.isnan(train_X).any() or torch.isinf(train_X).any():
             print("Warning: Cleaning NaN/Inf values from train_X before normalization")
-            self.train_X = torch.nan_to_num(self.train_X, nan=0.0, posinf=None, neginf=None)
+            train_X = torch.nan_to_num(train_X, nan=0.0, posinf=None, neginf=None)
             
-        if torch.isnan(self.train_Y).any() or torch.isinf(self.train_Y).any():
+        if torch.isnan(train_Y_arr).any() or torch.isinf(train_Y_arr).any():
             print("Warning: Cleaning NaN/Inf values from train_Y before normalization")
-            self.train_Y = torch.nan_to_num(self.train_Y, nan=0.0, posinf=None, neginf=None)
+            train_Y_arr = torch.nan_to_num(train_Y_arr, nan=0.0, posinf=None, neginf=None)
 
         # Normalise training data
-        train_X_norm = normalize(self.train_X, self.bounds)
+        train_X_norm = normalize(train_X, self.bounds)
         
         # Check for and clean NaN/infinite values after normalization
         if torch.isnan(train_X_norm).any() or torch.isinf(train_X_norm).any():
             print("Warning: Cleaning NaN/Inf values from normalized train_X")
             train_X_norm = torch.nan_to_num(train_X_norm, nan=0.0, posinf=None, neginf=None)
         
-        train_Y = self.train_Y if self.train_Y.dim() == 2 else self.train_Y.unsqueeze(-1)
+        train_Y = train_Y_arr if train_Y_arr.dim() == 2 else train_Y_arr.unsqueeze(-1)
         
         # Check for and clean NaN/infinite values in Y
         if torch.isnan(train_Y).any() or torch.isinf(train_Y).any():
@@ -357,20 +570,23 @@ class DACOptimizer:
         Propose the next `n_candidates` experiments.
 
         Uses BoTorch's qExpectedImprovement when enough data is available,
-        otherwise falls back to random sampling.
+        otherwise falls back to random sampling. Candidates are filtered to
+        only include materials within the session's selected search bounds.
         """
         if self.bounds is None:
             raise RuntimeError("Bounds not initialised.")
 
-        # Stage 1: generate raw candidates (twice as many for later filtering)
-        if not self._has_enough_data() or self.gp_model is None:
-            candidates_raw = self._random_candidates(self.Q_VALUES)
+        # Over-sample to account for session-bounds filtering
+        n_raw = max(self.Q_VALUES * 3, n_candidates * 5)
+
+        # Stage 1: generate raw candidates
+        if not self._has_enough_data(min_points=0) or self.gp_model is None:
+            candidates_raw = self._random_candidates(n_raw)
         else:
             # Ensure training data dimension matches bounds
             if self.train_X.shape[1] != self.bounds.shape[1]:
-                raise RuntimeError(
-                    f"Warning: train_X dim {self.train_X.shape[1]} != bounds dim {self.bounds.shape[1]}. Falling back to random.")
-                # candidates_raw = self._random_candidates(self.Q_VALUES)
+                print(f"Warning: train_X dim {self.train_X.shape[1]} != bounds dim {self.bounds.shape[1]}. Falling back to random.")
+                candidates_raw = self._random_candidates(n_raw)
             else:
                 # Use the fitted GP model
                 best_f = self.train_Y.max().item()
@@ -383,30 +599,40 @@ class DACOptimizer:
                 candidates_norm, _ = optimize_acqf(
                     acq_function=qEI,
                     bounds=norm_bounds,
-                    q=self.Q_VALUES,
+                    q=n_raw,
                     num_restarts=20,
                     raw_samples=2048,
                     options={"maxiter": 200}
                 )
                 candidates_raw = unnormalize(candidates_norm, self.bounds)
                 candidates_raw = self._round_categorical(candidates_raw)
+                candidates_raw = self._pin_conditions_to_target(candidates_raw)
 
-        # Stage 2: decode, compute predictions, rank by EI
-        all_configs = []
+        # Stage 2: filter candidates to session bounds
+        valid_candidates = []
         for candidate in candidates_raw:
+            if self._is_within_session_bounds(candidate):
+                valid_candidates.append(candidate)
+
+        # If not enough valid candidates, fill with session-restricted random ones
+        if len(valid_candidates) < n_candidates:
+            extra = self._random_session_candidates(n_candidates - len(valid_candidates))
+            valid_candidates.extend([extra[i] for i in range(extra.shape[0])])
+
+        # Stage 3: decode, compute predictions, rank
+        all_configs = []
+        for candidate in valid_candidates:
             config = self._decode_config(candidate)
-            # Use compute_prediction method
             mean, std = self.compute_prediction(candidate)
             ei = self.compute_ei(candidate)
 
             config['Predicted_CO2_Capacity_mmol_g'] = round(mean, 4)
-
             config['Uncertainty'] = round(std, 4)
             config['Expected_Improvement'] = ei
 
             all_configs.append(config)
 
-        # Sort by EI descending and return top n_candidates
+        # Sort by predicted capacity descending and return top n_candidates
         all_configs.sort(key=lambda x: x['Predicted_CO2_Capacity_mmol_g'], reverse=True)
         return all_configs[:n_candidates]
 
@@ -456,24 +682,15 @@ class DACOptimizer:
             
         ei = self.compute_ei(X_new)
 
-        # --- Update training data ---
+        # --- Add to new experiment data (preserves baseline) ---
         y_new = torch.tensor([[actual]], dtype=torch.float32)
-        
+
         # Check for NaN or infinite values in y_new
         if torch.isnan(y_new).any() or torch.isinf(y_new).any():
             print(f"Warning: Encountered NaN or Inf values in y_new: {y_new}")
-            # Replace NaN with 0 and clamp infinite values
             y_new = torch.nan_to_num(y_new, nan=0.0, posinf=None, neginf=None)
 
-        if self.train_X.numel() == 0:
-            self.train_X = X_new
-            self.train_Y = y_new
-        else:
-            self.train_X = torch.cat([self.train_X, X_new], dim=0)
-            self.train_Y = torch.cat([self.train_Y, y_new], dim=0)
-
-        # --- Refit GP with updated data ---
-        self.fit_gp()
+        self.add_new_experiment(X_new, y_new)
 
         # --- Record in history with computed metadata ---
         self.history.add_entry(
@@ -487,3 +704,162 @@ class DACOptimizer:
     def get_history(self) -> History:
         """Return the history object."""
         return self.history
+
+    # ------------------------------------------------------------------
+    # Model persistence: save / load pre-trained GP model + encoder
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _tensor_hash(tensor: torch.Tensor) -> str:
+        """Compute an MD5 hash of a tensor for change detection."""
+        if tensor.numel() == 0:
+            return "empty"
+        return hashlib.md5(tensor.numpy().tobytes()).hexdigest()
+
+    @staticmethod
+    def find_latest_model(directory: str) -> Optional[str]:
+        """Check if a base model exists under `directory/base/`."""
+        base_dir = os.path.join(directory, 'base')
+        if os.path.isdir(base_dir) and os.path.exists(os.path.join(base_dir, 'metadata.json')):
+            return 'base'
+        return None
+
+    def save_model(self, directory: str, version: str = "v1") -> str:
+        """
+        Save the GP model, encoder, and metadata to a versioned directory.
+
+        Returns the path to the saved directory.
+        """
+        save_dir = os.path.join(directory, version)
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Save GP model state dict + training data needed to reconstruct the model
+        if self.gp_model is not None and self.train_X.numel() > 0:
+            train_X_norm = normalize(self.train_X.clone(), self.bounds)
+            train_Y = self.train_Y.clone()
+            if train_Y.dim() == 1:
+                train_Y = train_Y.unsqueeze(-1)
+            torch.save({
+                'model_state_dict': self.gp_model.state_dict(),
+                'train_X_norm': train_X_norm,
+                'train_Y': train_Y,
+            }, os.path.join(save_dir, 'gp_model.pt'))
+
+        # Save encoder
+        with open(os.path.join(save_dir, 'encoder.pkl'), 'wb') as f:
+            pickle.dump(self.encoder.label_encoders, f)
+
+        # Save metadata
+        metadata = {
+            'version': version,
+            'created_at': datetime.now().isoformat(),
+            'n_baseline_points': self.baseline_X.shape[0] if self.baseline_X.numel() > 0 else 0,
+            'n_total_points': self.train_X.shape[0] if self.train_X.numel() > 0 else 0,
+            'baseline_X_hash': self._tensor_hash(self.baseline_X),
+            'encoder_classes': {
+                col: list(le.classes_) for col, le in self.encoder.label_encoders.items()
+            },
+            'feature_names': self.FEATURE_NAMES,
+        }
+        with open(os.path.join(save_dir, 'metadata.json'), 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        return save_dir
+
+    def load_model(self, directory: str, version: str = "v1",
+                   baseline_X: Optional[torch.Tensor] = None) -> bool:
+        """
+        Load a pre-trained GP model and encoder from a versioned directory.
+
+        Args:
+            directory: Parent directory containing versioned subdirectories.
+            version: Version string (e.g. "v1").
+            baseline_X: Current baseline data tensor, used to verify the model
+                        matches the current data via hash comparison.
+
+        Returns True if loading succeeded, False otherwise.
+        """
+        load_dir = os.path.join(directory, version)
+        if not os.path.exists(load_dir):
+            return False
+
+        # Load and validate metadata
+        metadata_path = os.path.join(load_dir, 'metadata.json')
+        if not os.path.exists(metadata_path):
+            print(f"Warning: No metadata.json in {load_dir}")
+            return False
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+
+        # If baseline data is provided, verify it matches the saved model
+        if baseline_X is not None and baseline_X.numel() > 0:
+            current_hash = self._tensor_hash(baseline_X)
+            saved_hash = metadata.get('baseline_X_hash', '')
+            if current_hash != saved_hash:
+                print(f"Info: Baseline data changed (hash {current_hash[:8]}... vs saved {saved_hash[:8]}...). Will retrain.")
+                return False
+
+        # Load encoder
+        encoder_path = os.path.join(load_dir, 'encoder.pkl')
+        if not os.path.exists(encoder_path):
+            print(f"Warning: No encoder.pkl in {load_dir}")
+            return False
+        with open(encoder_path, 'rb') as f:
+            loaded_encoders = pickle.load(f)
+
+        # Verify encoder classes match metadata
+        for col, expected_classes in metadata.get('encoder_classes', {}).items():
+            if col in loaded_encoders:
+                actual_classes = list(loaded_encoders[col].classes_)
+                if actual_classes != expected_classes:
+                    print(f"Warning: Encoder class mismatch for {col}. Model version is stale.")
+                    return False
+
+        # Apply loaded encoder
+        self.encoder.label_encoders = loaded_encoders
+        self.unique_supports = list(loaded_encoders['Support'].classes_) if 'Support' in loaded_encoders else self.unique_supports
+        self.unique_amines1 = list(loaded_encoders['Amine_1_or_Additive_1'].classes_) if 'Amine_1_or_Additive_1' in loaded_encoders else self.unique_amines1
+        self.unique_amines2 = list(loaded_encoders['Amine_2_or_Additive_2'].classes_) if 'Amine_2_or_Additive_2' in loaded_encoders else self.unique_amines2
+        self.bounds = self._init_bounds_tensor()
+        self._compute_session_indices()
+
+        # Load GP model
+        model_path = os.path.join(load_dir, 'gp_model.pt')
+        if not os.path.exists(model_path):
+            print(f"Warning: No gp_model.pt in {load_dir}")
+            return False
+
+        try:
+            checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+            train_X_norm = checkpoint.get('train_X_norm')
+            train_Y = checkpoint.get('train_Y')
+
+            if train_X_norm is not None and train_Y is not None:
+                if train_Y.dim() == 1:
+                    train_Y = train_Y.unsqueeze(-1)
+
+                # Recreate GP model structure and load state dict
+                self.gp_model = SingleTaskGP(
+                    train_X_norm,
+                    train_Y,
+                    outcome_transform=Standardize(m=1)
+                )
+                self.gp_model.load_state_dict(checkpoint['model_state_dict'])
+                self.gp_model.eval()
+                self.mll = ExactMarginalLogLikelihood(self.gp_model.likelihood, self.gp_model)
+
+                # Restore training data tensors (from normalized, unnormalize back)
+                self.train_X = unnormalize(train_X_norm, self.bounds)
+                self.train_Y = train_Y
+            else:
+                print("Warning: checkpoint missing train_X_norm or train_Y")
+                return False
+
+        except Exception as e:
+            print(f"Error loading GP model: {e}")
+            self.gp_model = None
+            self.mll = None
+            return False
+
+        self._model_version = metadata.get('version', version)
+        return True
