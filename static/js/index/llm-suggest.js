@@ -112,19 +112,22 @@ async function requestLLMSuggestions() {
                             if (sourcesPanel && sourcesList && llmSearchSources.length > 0) {
                                 sourcesPanel.style.display = 'block';
                                 let srcHtml = `<div class="d-flex align-items-center mb-2">
-                                    <i class="fas fa-search text-primary me-2"></i>
-                                    <span class="fw-semibold small">Referenced Sources</span>
+                                    <i class="fas fa-book-open text-primary me-2"></i>
+                                    <span class="fw-semibold small">References</span>
                                     <span class="badge bg-primary ms-2">${llmSearchSources.length}</span>
                                 </div>`;
-                                srcHtml += '<ol class="mb-0 ps-3" style="font-size: 0.82em;">';
+                                srcHtml += '<div class="reference-list">';
                                 llmSearchSources.forEach(s => {
-                                    srcHtml += `<li class="mb-1">
-                                        <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
-                                            ${escapeHtml(s.title)} <i class="fas fa-external-link-alt fa-xs ms-1"></i>
+                                    const domain = extractDomain(s.url);
+                                    srcHtml += `<div class="reference-item">
+                                        <span class="reference-number">[${s.index}]</span>
+                                        <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer" class="reference-link">
+                                            ${escapeHtml(s.title)}
                                         </a>
-                                    </li>`;
+                                        <span class="reference-domain">${escapeHtml(domain)}</span>
+                                    </div>`;
                                 });
-                                srcHtml += '</ol>';
+                                srcHtml += '</div>';
                                 sourcesList.innerHTML = srcHtml;
                             }
                         } else if (currentEvent === 'token') {
@@ -230,6 +233,7 @@ function displayLLMSuggestions(suggestions) {
                     <strong>BET:</strong> ${s.BET_Bare_Surface_Area_m2_g != null ? parseFloat(s.BET_Bare_Surface_Area_m2_g).toFixed(1) : 'N/A'} m&sup2;/g &middot;
                     <strong>Pore:</strong> ${s.Average_Bare_Pore_Diameter_nm != null ? parseFloat(s.Average_Bare_Pore_Diameter_nm).toFixed(2) : 'N/A'} nm
                 </p>
+                ${s.Expected_CO2_Capacity_mmol_g != null ? `<p class="mb-1"><span class="badge bg-success"><i class="fas fa-leaf me-1"></i>Est. CO₂ Capacity: ${parseFloat(s.Expected_CO2_Capacity_mmol_g).toFixed(2)} mmol/g</span></p>` : ''}
                 <div class="mt-1 p-2 bg-light rounded" style="font-size: 0.85em; max-height: 120px; overflow-y: auto;">
                     <i class="fas fa-brain text-purple me-1"></i><strong>AI Reasoning:</strong> ${renderCitedReasoning(s.reasoning || 'No reasoning provided')}
                 </div>
@@ -303,6 +307,15 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function extractDomain(url) {
+    try {
+        const host = new URL(url).hostname.replace(/^www\./, '');
+        return host;
+    } catch (e) {
+        return '';
+    }
 }
 
 function renderCitedReasoning(text) {

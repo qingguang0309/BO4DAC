@@ -1,32 +1,38 @@
 """
 LLM-assisted suggestion service for DAC optimization.
 
-When the GP model's uncertainty drops below a threshold, this module calls
-an LLM (via DashScope native SDK) to suggest novel formulations
-that the Bayesian optimizer might miss.
-
-Supports both synchronous and streaming (SSE) responses.
-Web search sources and citations are extracted and forwarded to the frontend.
+Uses the OpenAI Responses API (DashScope compatible-mode) with built-in
+web_search tool for literature-grounded suggestions. Supports both
+synchronous and streaming (SSE) responses.
 """
 
 import os
 import re
 import json
 import logging
-from http import HTTPStatus
 from typing import List, Dict, Any, Optional, Generator
 
 from dotenv import load_dotenv
-import dashscope
+from openai import OpenAI
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
-MODEL = os.getenv("MODEL", "deepseek-v4-pro")
+BASE_URL = os.getenv("BASE_URL", "")
+MODEL = os.getenv("MODEL", "qwen-plus")
 ENABLE_THINKING = os.getenv("ENABLE_THINKING", "False").lower() in ("true", "1", "yes")
 ENABLE_WEB_SEARCH = os.getenv("ENABLE_WEB_SEARCH", "True").lower() in ("true", "1", "yes")
+
+_client = None
+
+
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        _client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+    return _client
 
 
 def _build_prompt(
@@ -69,8 +75,7 @@ def _build_prompt(
     flow = conditions.get("flowRate", 100.0)
     method = conditions.get("testMethod", "TGA")
 
-    # --- Experimental data table (with conditions & predictions) ---
-    # Only include experiments that match the session filter (train-only data excluded from LLM prompt)
+    # --- Experimental data table ---
     filtered_experiments = [e for e in experiments if e.get('matches_filter', True)]
     header = "| # | Support | Amine1 | Amine2 | OC% | BET | Pore | T(C) | CO2% | RH% | Pred | Actual | Hist? |"
     sep = "|---|---------|--------|--------|-----|-----|------|------|------|-----|------|--------|-------|"
@@ -134,10 +139,9 @@ def _build_prompt(
         )
     cand_block = "\n".join(cand_lines) if cand_lines else "(no candidates generated yet)"
 
-    # --- Pre-compute experimental findings for search guidance ---
+    # --- Pre-compute experimental findings ---
     findings_lines = []
 
-    # Top formulations by capacity
     sorted_exps = sorted(filtered_experiments, key=lambda e: e.get("experimental_performance", 0.0), reverse=True)
     if sorted_exps:
         top3 = sorted_exps[:min(3, len(sorted_exps))]
@@ -151,7 +155,6 @@ def _build_prompt(
                 f"Capacity={cap:.4f} mmol/g"
             )
 
-    # Tested vs untested combos
     tested_combos = set()
     for exp in filtered_experiments:
         c = exp.get("candidate", {})
@@ -170,13 +173,11 @@ def _build_prompt(
         else:
             findings_lines.append("Sample untested combos: " + ", ".join(untested[:10]) + f" ... (+{len(untested)-10} more)")
 
-    # OC range of top performers
     if sorted_exps:
         top_oc_vals = [exp.get("candidate", {}).get("Organic_Content_pct", 0) for exp in sorted_exps[:min(5, len(sorted_exps))]]
         if top_oc_vals:
             findings_lines.append(f"\nOC% range of top 5 performers: {min(top_oc_vals):.1f}-{max(top_oc_vals):.1f}% (search space allows {oc_range[0]}-{oc_range[1]}%)")
 
-    # Prediction bias (Pred vs Actual)
     pred_actual_diffs = []
     for exp in filtered_experiments:
         pred = exp.get("predicted_performance", 0.0)
@@ -188,7 +189,6 @@ def _build_prompt(
         direction = "over-predicting" if avg_bias < 0 else "under-predicting"
         findings_lines.append(f"\nGP model bias: {direction} by {abs(avg_bias):.4f} mmol/g on average (across {len(pred_actual_diffs)} experiments with predictions)")
 
-    # Support-specific performance
     support_caps = {}
     for exp in filtered_experiments:
         c = exp.get("candidate", {})
@@ -201,7 +201,6 @@ def _build_prompt(
         for sp, caps in sorted(support_caps.items(), key=lambda x: max(x[1]), reverse=True):
             findings_lines.append(f"  {sp}: max={max(caps):.4f}, mean={sum(caps)/len(caps):.4f}, n={len(caps)}")
 
-    # Amine efficiency (capacity / OC)
     amine_eff = {}
     for exp in filtered_experiments:
         c = exp.get("candidate", {})
@@ -218,21 +217,13 @@ def _build_prompt(
 
     findings_block = "\n".join(findings_lines) if findings_lines else "(insufficient data for analysis)"
 
-    # --- Derive targeted search queries from findings ---
-    best_amine1 = ""
-    best_support = ""
-    if sorted_exps:
-        c0 = sorted_exps[0].get("candidate", {})
-        best_amine1 = c0.get("Amine_1_or_Additive_1", "")
-        best_support = c0.get("Support", "")
-
     prompt = f"""You are an expert in Direct Air Capture (DAC) CO2 capture materials optimization.
 We are optimizing amine-impregnated solid sorbents for CO2 capture using Bayesian Optimization.
 
 STEP 1 — ANALYZE the experimental data and findings below. Identify key patterns, gaps, and opportunities.
 
 STEP 2 — SEARCH the web for research specifically relevant to the findings, and sources are based on academic websites. Target your searches based on what the experiment shows, not generic topics. For example:
-Search relevant acdemic articles from current [Search Space] , [Experimental Conditions], [Optimization Configuration], with [Experimental Findings Summary] 
+Search relevant acdemic articles from current [Search Space] , [Experimental Conditions], [Optimization Configuration], with [Experimental Findings Summary]
 
 STEP 3 — Suggest 3-5 NOVEL formulations guided by both the data findings and search results.
 
@@ -270,38 +261,23 @@ Format your response as a JSON array. Each element must have:
 - "Amine_1_or_Additive_1": string (from the amines 1 list)
 - "Amine_2_or_Additive_2": string (from the amines 2 list)
 - "Organic_Content_pct": number
-- "BET_Bare_Surface_Area_m2_g": number
-- "Average_Bare_Pore_Diameter_nm": number
+- "BET_Bare_Surface_Area_m2_g": float
+- "Average_Bare_Pore_Diameter_nm": float
+- "Expected_CO2_Capacity_mmol_g": float (2 decimal) (your estimated CO2 capture capacity in mmol/g, based on literature and the experimental data)
 - "reasoning": string (scientific explanation with [N] citation markers referencing search sources)
 
 Output ONLY the JSON array, no other text."""
     return prompt
 
 
-def _extract_sources(search_info: Optional[Dict]) -> List[Dict[str, Any]]:
-    """Extract source list from DashScope search_info."""
-    if not search_info or not search_info.get("search_results"):
-        return []
-    sources = []
-    for web in search_info["search_results"]:
-        sources.append({
-            "index": web.get("index", 0),
-            "title": web.get("title", ""),
-            "url": web.get("url", ""),
-        })
-    return sources
-
-
 def _parse_suggestions(raw: str, search_bounds: Dict) -> List[Dict[str, Any]]:
     """Extract and validate structured suggestions from the LLM response."""
-    # Strip markdown code fences
     cleaned = re.sub(r"```json\s*", "", raw)
     cleaned = re.sub(r"```\s*", "", cleaned)
     cleaned = cleaned.strip()
 
     suggestions = []
 
-    # Try direct JSON parse
     try:
         result = json.loads(cleaned)
         if isinstance(result, list):
@@ -309,7 +285,6 @@ def _parse_suggestions(raw: str, search_bounds: Dict) -> List[Dict[str, Any]]:
     except json.JSONDecodeError:
         pass
 
-    # Try to find JSON array with regex
     if not suggestions:
         match = re.search(r"\[.*\]", cleaned, re.DOTALL)
         if match:
@@ -323,7 +298,6 @@ def _parse_suggestions(raw: str, search_bounds: Dict) -> List[Dict[str, Any]]:
     if not suggestions:
         return [{"reasoning": raw, "raw_response": True}]
 
-    # Validate and sanitize
     valid_supports = set(search_bounds.get("supports", []))
     valid_amine1 = set(search_bounds.get("amine1", []))
     valid_amine2 = set(search_bounds.get("amine2", []))
@@ -339,7 +313,7 @@ def _parse_suggestions(raw: str, search_bounds: Dict) -> List[Dict[str, Any]]:
             s["Amine_1_or_Additive_1"] = list(valid_amine1)[0]
         if s.get("Amine_2_or_Additive_2") not in valid_amine2 and valid_amine2:
             s["Amine_2_or_Additive_2"] = "No"
-        for field in ["Organic_Content_pct", "BET_Bare_Surface_Area_m2_g", "Average_Bare_Pore_Diameter_nm"]:
+        for field in ["Organic_Content_pct", "BET_Bare_Surface_Area_m2_g", "Average_Bare_Pore_Diameter_nm", "Expected_CO2_Capacity_mmol_g"]:
             try:
                 s[field] = float(s.get(field, 0))
             except (TypeError, ValueError):
@@ -347,6 +321,96 @@ def _parse_suggestions(raw: str, search_bounds: Dict) -> List[Dict[str, Any]]:
         validated.append(s)
 
     return validated
+
+
+def _title_from_url(url: str) -> str:
+    """Derive a readable title from a URL when no title is provided.
+
+    Produces academic-style references: Publisher — Path hint.
+    """
+    try:
+        from urllib.parse import urlparse, unquote
+        parsed = urlparse(url)
+        host = parsed.netloc or parsed.path
+        host = re.sub(r'^www\.', '', host)
+
+        # Map common academic domains to publisher names
+        publisher_map = {
+            'sciencedirect.com': 'ScienceDirect',
+            'springer.com': 'Springer',
+            'link.springer.com': 'Springer',
+            'nature.com': 'Nature',
+            'pubs.acs.org': 'ACS Publications',
+            'acs.org': 'ACS',
+            'wiley.com': 'Wiley',
+            'onlinelibrary.wiley.com': 'Wiley',
+            'pubmed.ncbi.nlm.nih.gov': 'PubMed',
+            'ncbi.nlm.nih.gov': 'NCBI',
+            'arxiv.org': 'arXiv',
+            'doi.org': 'DOI',
+            'researchgate.net': 'ResearchGate',
+            'semanticscholar.org': 'Semantic Scholar',
+            'scholar.google.com': 'Google Scholar',
+            'mdpi.com': 'MDPI',
+            'rsc.org': 'RSC',
+            'pubs.rsc.org': 'RSC Publishing',
+            'elsevier.com': 'Elsevier',
+            'tandfonline.com': 'Taylor & Francis',
+            'ieee.org': 'IEEE',
+            'dl.acm.org': 'ACM Digital Library',
+            'jstor.org': 'JSTOR',
+            'pnas.org': 'PNAS',
+            'cell.com': 'Cell Press',
+            'sciencedirect.io': 'ScienceDirect',
+        }
+        publisher = publisher_map.get(host, host)
+
+        # Extract a hint from the path
+        path = unquote(parsed.path).strip('/')
+        # Remove common prefixes like /science/article, /content, /article
+        path = re.sub(r'^(science/article|content/article|article/abs|article/full|doi/abs|doi/full|doi/pdf|book|chapter|journal)/?', '', path, flags=re.IGNORECASE)
+        # Clean up the remaining path
+        path = path.replace('_', ' ').replace('-', ' ')
+        segments = [s for s in path.split('/') if s and not re.match(r'^[a-f0-9]{8,}$', s)]
+
+        if segments:
+            hint = segments[-1]
+            # Truncate long hints
+            if len(hint) > 80:
+                hint = hint[:77] + '...'
+            # Capitalize first letter
+            hint = hint[0].upper() + hint[1:] if hint else ''
+            return f"{publisher} — {hint}"
+        return publisher
+    except Exception:
+        return url[:60]
+
+
+def _extract_sources_from_output(output_items: list) -> List[Dict[str, Any]]:
+    """Extract web search sources from Responses API output items.
+
+    Deduplicates by URL and derives titles when missing.
+    """
+    seen_urls = set()
+    sources = []
+    for item in output_items:
+        if hasattr(item, 'type') and item.type == 'web_search_call':
+            action = getattr(item, 'action', None)
+            if action and hasattr(action, 'sources'):
+                for src in action.sources:
+                    url = getattr(src, 'url', '')
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    title = getattr(src, 'title', '') or ''
+                    if not title:
+                        title = _title_from_url(url)
+                    sources.append({
+                        "index": len(sources) + 1,
+                        "title": title,
+                        "url": url,
+                    })
+    return sources
 
 
 def stream_llm_suggestions(
@@ -358,14 +422,14 @@ def stream_llm_suggestions(
     optimization_info: Optional[Dict] = None,
 ) -> Generator[str, None, None]:
     """
-    Stream LLM suggestions as SSE events.
+    Stream LLM suggestions as SSE events using the Responses API.
 
     Yields SSE-formatted strings:
-      - event: search_source  data: {"sources": [...]}  — web search sources (if enabled)
-      - event: token   data: {"text": "..."}    — each chunk of streamed text
-      - event: thinking data: {"text": "..."}   — reasoning tokens (if enable_thinking)
-      - event: done    data: {"suggestions": [...], "raw_response": "..."}  — final result
-      - event: error   data: {"error": "..."}   — on failure
+      - event: search_source  data: {"sources": [...]}  — web search sources
+      - event: token   data: {"text": "..."}            — streamed text
+      - event: thinking data: {"text": "..."}           — reasoning tokens
+      - event: done    data: {"suggestions": [...], ...} — final result
+      - event: error   data: {"error": "..."}           — on failure
     """
     if not API_KEY:
         yield _sse("error", {"error": "DASHSCOPE_API_KEY not set in .env"})
@@ -374,73 +438,90 @@ def stream_llm_suggestions(
     prompt = _build_prompt(experiments, search_bounds, conditions, candidates, avg_uncertainty, optimization_info)
 
     try:
-        messages = [{"role": "user", "content": prompt}]
+        client = _get_client()
 
-        kwargs: Dict[str, Any] = dict(
-            api_key=API_KEY,
+        tools = []
+        if ENABLE_WEB_SEARCH:
+            tools.append({"type": "web_search"})
+
+        extra_body = {}
+        if ENABLE_THINKING:
+            extra_body["enable_thinking"] = True
+
+        stream = client.responses.create(
             model=MODEL,
-            messages=messages,
-            result_format="message",
+            input=prompt,
+            tools=tools if tools else None,
+            extra_body=extra_body if extra_body else None,
             stream=True,
-            incremental_output=True,
-            temperature=0.7,
-            max_tokens=4096,
-
         )
 
-        if ENABLE_THINKING:
-            kwargs["enable_thinking"] = True
-
-        if ENABLE_WEB_SEARCH:
-            kwargs["enable_search"] = True
-            kwargs["search_options"] = {
-                "enable_source": True,
-                "enable_citation": True,
-                "prepend_search_result": True,
-                "forced_search": True,
-                "search_strategy": "max"
-            }
-
-
-        responses = dashscope.Generation.call(**kwargs)
-
         full_text = ""
-        search_sources_emitted = False
-        for resp in responses:
-            # Check for API error chunks
-            if resp.status_code != HTTPStatus.OK:
-                error_msg = resp.message or resp.get("message", f"API error {resp.status_code}")
-                yield _sse("error", {"error": error_msg})
-                return
+        search_sources = []
+        seen_urls = set()
 
-            if not resp.output:
-                continue
+        for event in stream:
+            # Web search completed — extract sources
+            if event.type == "response.web_search_call.completed":
+                # Try extracting from the event's item or action
+                for attr_name in ('item', 'output_item'):
+                    item = getattr(event, attr_name, None)
+                    if item:
+                        action = getattr(item, 'action', None)
+                        if action and hasattr(action, 'sources'):
+                            for src in action.sources:
+                                url = getattr(src, 'url', '')
+                                if not url or url in seen_urls:
+                                    continue
+                                seen_urls.add(url)
+                                title = getattr(src, 'title', '') or ''
+                                if not title:
+                                    title = _title_from_url(url)
+                                search_sources.append({
+                                    "index": len(search_sources) + 1,
+                                    "title": title,
+                                    "url": url,
+                                })
+                # Also try the event's action directly
+                if not search_sources:
+                    action = getattr(event, 'action', None)
+                    if action and hasattr(action, 'sources'):
+                        for src in action.sources:
+                            url = getattr(src, 'url', '')
+                            if not url or url in seen_urls:
+                                continue
+                            seen_urls.add(url)
+                            title = getattr(src, 'title', '') or ''
+                            if not title:
+                                title = _title_from_url(url)
+                            search_sources.append({
+                                "index": len(search_sources) + 1,
+                                "title": title,
+                                "url": url,
+                            })
+                if search_sources:
+                    yield _sse("search_source", {"sources": search_sources})
 
-            # Emit search sources from the first chunk that has them
-            if not search_sources_emitted:
-                search_info = resp.output.get("search_info")
-                if search_info:
-                    sources = _extract_sources(search_info)
-                    if sources:
-                        yield _sse("search_source", {"sources": sources})
-                    search_sources_emitted = True
+            # Thinking/reasoning tokens
+            elif event.type == "response.reasoning_summary_text.delta":
+                delta_text = getattr(event, 'delta', '')
+                if delta_text:
+                    yield _sse("thinking", {"text": delta_text})
 
-            if not resp.output.get("choices"):
-                continue
+            # Content text tokens
+            elif event.type == "response.output_text.delta":
+                delta_text = getattr(event, 'delta', '')
+                if delta_text:
+                    full_text += delta_text
+                    yield _sse("token", {"text": delta_text})
 
-            choice = resp.output["choices"][0]
-            message = choice.get("message", {})
-
-            # Standard content
-            content = message.get("content", "")
-            if content:
-                full_text += content
-                yield _sse("token", {"text": content})
-
-            # Thinking/reasoning content (not accumulated into full_text)
-            reasoning = message.get("reasoning_content", "")
-            if reasoning:
-                yield _sse("thinking", {"text": reasoning})
+            # Completed — extract sources from final output if not already captured
+            elif event.type == "response.completed":
+                response_obj = getattr(event, 'response', None)
+                if response_obj and hasattr(response_obj, 'output'):
+                    final_sources = _extract_sources_from_output(response_obj.output)
+                    if final_sources and not search_sources:
+                        yield _sse("search_source", {"sources": final_sources})
 
         # Parse the full accumulated text into structured suggestions
         suggestions = _parse_suggestions(full_text, search_bounds)
@@ -448,6 +529,7 @@ def stream_llm_suggestions(
             "suggestions": suggestions,
             "raw_response": full_text,
             "avg_uncertainty": avg_uncertainty,
+            "search_sources": search_sources,
         })
 
     except Exception as e:
@@ -465,7 +547,9 @@ def get_llm_suggestions(
     optimization_info: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """
-    Non-streaming fallback. Returns dict with: suggestions, raw_response, avg_uncertainty, search_sources, error.
+    Non-streaming fallback using the Responses API.
+
+    Returns dict with: suggestions, raw_response, avg_uncertainty, search_sources, error.
     """
     if not API_KEY:
         return {
@@ -478,54 +562,40 @@ def get_llm_suggestions(
     prompt = _build_prompt(experiments, search_bounds, conditions, candidates, avg_uncertainty, optimization_info)
 
     try:
-        messages = [{"role": "user", "content": prompt}]
+        client = _get_client()
 
-        kwargs: Dict[str, Any] = dict(
-            api_key=API_KEY,
+        tools = []
+        if ENABLE_WEB_SEARCH:
+            tools.append({"type": "web_search"})
+
+        extra_body = {}
+        if ENABLE_THINKING:
+            extra_body["enable_thinking"] = True
+
+        response = client.responses.create(
             model=MODEL,
-            messages=messages,
-            result_format="message",
-            temperature=0.7,
-            max_tokens=4096,
+            input=prompt,
+            tools=tools if tools else None,
+            extra_body=extra_body if extra_body else None,
         )
 
-        if ENABLE_THINKING:
-            kwargs["enable_thinking"] = True
-
-        if ENABLE_WEB_SEARCH:
-            kwargs["enable_search"] = True
-            kwargs["search_options"] = {
-                "enable_source": True,
-                "enable_citation": True,
-            }
-
-        response = dashscope.Generation.call(**kwargs)
-
-        if response.status_code != HTTPStatus.OK:
-            error_msg = response.message or f"API error {response.status_code}"
-            return {
-                "suggestions": [],
-                "raw_response": "",
-                "avg_uncertainty": avg_uncertainty,
-                "error": error_msg,
-            }
-
-        raw_content = ""
-        search_sources = []
-        if response.output:
-            choices = response.output.get("choices", [])
-            if choices:
-                raw_content = choices[0].get("message", {}).get("content", "") or ""
-            search_info = response.output.get("search_info")
-            search_sources = _extract_sources(search_info)
+        raw_content = response.output_text or ""
+        search_sources = _extract_sources_from_output(response.output)
 
         suggestions = _parse_suggestions(raw_content, search_bounds)
+
+        # Web search usage info
+        web_search_count = 0
+        usage = getattr(response, 'usage', None)
+        if usage and hasattr(usage, 'x_tools') and usage.x_tools:
+            web_search_count = usage.x_tools.get('web_search', {}).get('count', 0)
 
         return {
             "suggestions": suggestions[:n_suggestions],
             "raw_response": raw_content,
             "avg_uncertainty": avg_uncertainty,
             "search_sources": search_sources,
+            "web_search_count": web_search_count,
             "error": None,
         }
 
