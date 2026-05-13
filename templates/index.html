@@ -3,7 +3,7 @@
 {% block title %}4‑Step Optimizer - DAC Material Optimizer{% endblock %}
 
 {% block styles %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/index.css') }}?v={{v}}">
 {% endblock %}
 
 {% block content %}
@@ -589,15 +589,15 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/index/state.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/ui-utils.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/navigation.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/step1.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/step2.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/step3.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/step4.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/experiment-modal.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/llm-suggest.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/actions.js') }}"></script>
-<script src="{{ url_for('static', filename='js/index/init.js') }}"></script>
+<script src="{{ url_for('static', filename='js/index/state.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/ui-utils.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/navigation.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/step1.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/step2.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/step3.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/step4.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/experiment-modal.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/llm-suggest.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/actions.js') }}?v={{v}}"></script>
+<script src="{{ url_for('static', filename='js/index/init.js') }}?v={{v}}"></script>
 {% endblock %}

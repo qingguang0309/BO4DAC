@@ -37,6 +37,11 @@ app.config['SESSION_TYPE'] = 'filesystem'
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 CORS(app)
 
+# Cache-busting: append ?v= to static URLs so browsers always fetch fresh files
+@app.context_processor
+def inject_static_version():
+    return {'v': int(datetime.now().timestamp())}
+
 # ----------------------------------------------------------------------
 # Constants
 # ----------------------------------------------------------------------
