@@ -1,4 +1,8 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import json
 import base64
 from io import BytesIO
@@ -662,6 +666,69 @@ def api_init():
         'best_capacity': best_cap,
         'data_points': total_data_points
     })
+
+@app.route('/api/add-material', methods=['POST'])
+def api_add_material():
+    """Add a custom material to the current session's search bounds and encoder.
+
+    Expects JSON: { "category": "supports"|"amine1"|"amine2", "name": "..." }
+    Returns the updated list for that category.
+    """
+    sid = get_active_session_id()
+    data = request.json
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    category = data.get('category')
+    name = data.get('name', '').strip()
+
+    valid_categories = {'supports', 'amine1', 'amine2'}
+    if category not in valid_categories:
+        return jsonify({'success': False, 'error': f'category must be one of {valid_categories}'}), 400
+    if not name:
+        return jsonify({'success': False, 'error': 'name cannot be empty'}), 400
+
+    # Map frontend category key to the internal categorical column name
+    cat_col_map = {
+        'supports': 'Support',
+        'amine1': 'Amine_1_or_Additive_1',
+        'amine2': 'Amine_2_or_Additive_2',
+    }
+    cat_col = cat_col_map[category]
+
+    # If there is an active session, update its search_bounds and BO encoder
+    if sid:
+        sess = db.get_session(sid)
+        if sess:
+            sb = sess.get('search_bounds', {})
+            current_list = sb.get(category, [])
+            if name in current_list:
+                return jsonify({'success': True, 'message': 'Material already exists', 'list': current_list})
+            current_list.append(name)
+            sb[category] = current_list
+            db.update_session(sid, {'search_bounds': sb})
+
+            # Expand the BO encoder if the session has one
+            if sid in session_bo_systems:
+                bo = session_bo_systems[sid]
+                added = bo.encoder.add_class(cat_col, name)
+                if added:
+                    # Refresh the unique-materials lists and bounds tensor
+                    if cat_col == 'Support':
+                        bo.unique_supports = list(bo.encoder.label_encoders[cat_col].classes_)
+                    elif cat_col == 'Amine_1_or_Additive_1':
+                        bo.unique_amines1 = list(bo.encoder.label_encoders[cat_col].classes_)
+                    elif cat_col == 'Amine_2_or_Additive_2':
+                        bo.unique_amines2 = list(bo.encoder.label_encoders[cat_col].classes_)
+                    bo.session_categorical_values[cat_col] = current_list
+                    bo.bounds = bo._init_bounds_tensor()
+                    bo._compute_session_indices()
+
+            return jsonify({'success': True, 'message': 'Material added', 'list': current_list})
+
+    # No active session — just return success (frontend will add to DEFAULT_CONFIG)
+    return jsonify({'success': True, 'message': 'Material added (no active session)'})
+
 
 @app.route('/api/generate-candidates', methods=['POST'])
 def api_generate_candidates():
