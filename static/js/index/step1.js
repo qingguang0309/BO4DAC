@@ -277,3 +277,47 @@ function removeSupport(support) {
     initMultiSelect(); // This will update the multi-select UI
     updateStep1Summary();
 }
+
+async function addCustomMaterial(category) {
+    const inputMap = { supports: 'addSupportInput', amine1: 'addAmine1Input', amine2: 'addAmine2Input' };
+    const input = document.getElementById(inputMap[category]);
+    const name = (input.value || '').trim();
+    if (!name) return;
+
+    // Add to DEFAULT_CONFIG so it appears in the list
+    if (!DEFAULT_CONFIG[category].includes(name)) {
+        DEFAULT_CONFIG[category].push(name);
+    }
+
+    // Auto-select the new material
+    if (!searchBounds[category].includes(name)) {
+        searchBounds[category].push(name);
+    }
+
+    // Persist to backend if session exists
+    try {
+        await fetch('/api/add-material', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ category, name })
+        });
+    } catch (e) {
+        console.warn('Failed to sync custom material to backend:', e);
+    }
+
+    input.value = '';
+    initMultiSelect();
+    updateStep1Summary();
+
+    // Flash the new item
+    const containers = { supports: 'supportsContainer', amine1: 'amine1Container', amine2: 'amine2Container' };
+    const container = document.getElementById(containers[category]);
+    const items = container.querySelectorAll('.multi-select-item');
+    items.forEach(item => {
+        if (item.textContent === name) {
+            item.style.transition = 'background-color 0.3s';
+            item.style.backgroundColor = '#d4edda';
+            setTimeout(() => { item.style.backgroundColor = ''; }, 1500);
+        }
+    });
+}
