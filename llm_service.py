@@ -220,12 +220,13 @@ def _build_prompt(
     prompt = f"""You are an expert in Direct Air Capture (DAC) CO2 capture materials optimization.
 We are optimizing amine-impregnated solid sorbents for CO2 capture using Bayesian Optimization.
 
-STEP 1 — ANALYZE the experimental data and findings below. Identify key patterns, gaps, and opportunities.
+STEP 1 — ANALYZE the experimental settings and data and findings below. Identify key patterns, gaps, and opportunities.
 
-STEP 2 — SEARCH the web for research specifically relevant to the findings, and sources are based on academic websites. Target your searches based on what the experiment shows, not generic topics. For example:
-Search relevant acdemic articles from current [Search Space] , [Experimental Conditions], [Optimization Configuration], with [Experimental Findings Summary]
+STEP 2 — SEARCH the web for research specifically relevant to the findings and search space, and sources are based on academic websites. Target your searches based on what the experiment shows, not generic topics. For example:
+Search relevant academic articles from current [Search Space] , [Experimental Conditions], [Optimization Configuration], with [Experimental Findings Summary]
 
-STEP 3 — Suggest 3-5 NOVEL formulations guided by both the data findings and search results.
+STEP 3 — Suggest 5 NOVEL and REASONABLE formulations guided by and experimental findings and search results. 
+Particularly at the beginning several iterations at less number of historical experiments, searching results with diverse optimal formulation for different material discovery is quite important.
 
 [Search Space]
 - Supports: {', '.join(supports)}
@@ -263,8 +264,8 @@ Format your response as a JSON array. Each element must have:
 - "Organic_Content_pct": number
 - "BET_Bare_Surface_Area_m2_g": float
 - "Average_Bare_Pore_Diameter_nm": float
-- "Expected_CO2_Capacity_mmol_g": float (2 decimal) (your estimated CO2 capture capacity in mmol/g, based on literature and the experimental data)
-- "reasoning": string (scientific explanation with [N] citation markers referencing search sources)
+- "Expected_CO2_Capacity_mmol_g": float (2 decimal) (your estimated CO2 capture capacity in mmol/g for the test method {method}, based on literature and the experimental data)
+- "reasoning": string (scientific explanation with [N] citation markers referencing search sources). 
 
 Output ONLY the JSON array, no other text."""
     return prompt
