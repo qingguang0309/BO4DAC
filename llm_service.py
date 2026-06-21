@@ -1,9 +1,11 @@
 """
 LLM-assisted suggestion service for DAC optimization.
 
-Uses the OpenAI Responses API (DashScope compatible-mode) with built-in
-web_search tool for literature-grounded suggestions. Supports both
-synchronous and streaming (SSE) responses.
+Uses an OpenAI-compatible chat.completions endpoint (e.g. GpuGeek / GLM)
+for the suggestions. Supports both synchronous and streaming (SSE)
+responses. Note: the OpenAI Responses API and its built-in web_search
+tool are NOT used here, because the GpuGeek endpoint does not implement
+them — web search sources are therefore unavailable.
 """
 
 import os
@@ -24,6 +26,9 @@ BASE_URL = os.getenv("BASE_URL", "")
 MODEL = os.getenv("MODEL", "qwen-plus")
 ENABLE_THINKING = os.getenv("ENABLE_THINKING", "False").lower() in ("true", "1", "yes")
 ENABLE_WEB_SEARCH = os.getenv("ENABLE_WEB_SEARCH", "True").lower() in ("true", "1", "yes")
+# Reasoning models (GLM) spend many tokens on hidden reasoning before the
+# final answer, so allow a generous completion budget.
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "8192"))
 
 _client = None
 
@@ -441,88 +446,32 @@ def stream_llm_suggestions(
     try:
         client = _get_client()
 
-        tools = []
-        if ENABLE_WEB_SEARCH:
-            tools.append({"type": "web_search"})
-
-        extra_body = {}
-        if ENABLE_THINKING:
-            extra_body["enable_thinking"] = True
-
-        stream = client.responses.create(
+        # GpuGeek / GLM: use the OpenAI-compatible chat.completions streaming API.
+        # The Responses API and built-in web_search tool are not supported.
+        stream = client.chat.completions.create(
             model=MODEL,
-            input=prompt,
-            tools=tools if tools else None,
-            extra_body=extra_body if extra_body else None,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=MAX_TOKENS,
             stream=True,
         )
 
         full_text = ""
         search_sources = []
-        seen_urls = set()
 
-        for event in stream:
-            # Web search completed — extract sources
-            if event.type == "response.web_search_call.completed":
-                # Try extracting from the event's item or action
-                for attr_name in ('item', 'output_item'):
-                    item = getattr(event, attr_name, None)
-                    if item:
-                        action = getattr(item, 'action', None)
-                        if action and hasattr(action, 'sources'):
-                            for src in action.sources:
-                                url = getattr(src, 'url', '')
-                                if not url or url in seen_urls:
-                                    continue
-                                seen_urls.add(url)
-                                title = getattr(src, 'title', '') or ''
-                                if not title:
-                                    title = _title_from_url(url)
-                                search_sources.append({
-                                    "index": len(search_sources) + 1,
-                                    "title": title,
-                                    "url": url,
-                                })
-                # Also try the event's action directly
-                if not search_sources:
-                    action = getattr(event, 'action', None)
-                    if action and hasattr(action, 'sources'):
-                        for src in action.sources:
-                            url = getattr(src, 'url', '')
-                            if not url or url in seen_urls:
-                                continue
-                            seen_urls.add(url)
-                            title = getattr(src, 'title', '') or ''
-                            if not title:
-                                title = _title_from_url(url)
-                            search_sources.append({
-                                "index": len(search_sources) + 1,
-                                "title": title,
-                                "url": url,
-                            })
-                if search_sources:
-                    yield _sse("search_source", {"sources": search_sources})
+        for chunk in stream:
+            if not getattr(chunk, "choices", None):
+                continue
+            delta = chunk.choices[0].delta
 
-            # Thinking/reasoning tokens
-            elif event.type == "response.reasoning_summary_text.delta":
-                delta_text = getattr(event, 'delta', '')
-                if delta_text:
-                    yield _sse("thinking", {"text": delta_text})
+            # Reasoning/thinking tokens (GLM returns these in reasoning_content)
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                yield _sse("thinking", {"text": reasoning})
 
             # Content text tokens
-            elif event.type == "response.output_text.delta":
-                delta_text = getattr(event, 'delta', '')
-                if delta_text:
-                    full_text += delta_text
-                    yield _sse("token", {"text": delta_text})
-
-            # Completed — extract sources from final output if not already captured
-            elif event.type == "response.completed":
-                response_obj = getattr(event, 'response', None)
-                if response_obj and hasattr(response_obj, 'output'):
-                    final_sources = _extract_sources_from_output(response_obj.output)
-                    if final_sources and not search_sources:
-                        yield _sse("search_source", {"sources": final_sources})
+            if getattr(delta, "content", None):
+                full_text += delta.content
+                yield _sse("token", {"text": delta.content})
 
         # Parse the full accumulated text into structured suggestions
         suggestions = _parse_suggestions(full_text, search_bounds)
@@ -565,38 +514,26 @@ def get_llm_suggestions(
     try:
         client = _get_client()
 
-        tools = []
-        if ENABLE_WEB_SEARCH:
-            tools.append({"type": "web_search"})
-
-        extra_body = {}
-        if ENABLE_THINKING:
-            extra_body["enable_thinking"] = True
-
-        response = client.responses.create(
+        # GpuGeek / GLM exposes an OpenAI-compatible chat.completions endpoint.
+        # The Responses API and built-in web_search tool are not supported, so
+        # we call chat.completions directly. Web search sources are unavailable.
+        response = client.chat.completions.create(
             model=MODEL,
-            input=prompt,
-            tools=tools if tools else None,
-            extra_body=extra_body if extra_body else None,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=MAX_TOKENS,
         )
 
-        raw_content = response.output_text or ""
-        search_sources = _extract_sources_from_output(response.output)
+        raw_content = (response.choices[0].message.content or "").strip()
+        search_sources = []
 
         suggestions = _parse_suggestions(raw_content, search_bounds)
-
-        # Web search usage info
-        web_search_count = 0
-        usage = getattr(response, 'usage', None)
-        if usage and hasattr(usage, 'x_tools') and usage.x_tools:
-            web_search_count = usage.x_tools.get('web_search', {}).get('count', 0)
 
         return {
             "suggestions": suggestions[:n_suggestions],
             "raw_response": raw_content,
             "avg_uncertainty": avg_uncertainty,
             "search_sources": search_sources,
-            "web_search_count": web_search_count,
+            "web_search_count": 0,
             "error": None,
         }
 
