@@ -1,19 +1,25 @@
 """
 LLM-assisted suggestion service for DAC optimization.
 
-Uses an OpenAI-compatible chat.completions endpoint (e.g. GpuGeek / GLM)
-for the suggestions. Supports both synchronous and streaming (SSE)
-responses. Note: the OpenAI Responses API and its built-in web_search
-tool are NOT used here, because the GpuGeek endpoint does not implement
-them — web search sources are therefore unavailable.
+Uses an OpenAI-compatible chat.completions endpoint (e.g. DashScope/Qwen or
+GpuGeek/GLM) for the suggestions, with optional literature grounding via the
+Tavily web search API. Supports both synchronous and streaming (SSE) responses.
+
+Web search runs when ENABLE_WEB_SEARCH is true and TAVILY_API_KEY is set:
+targeted academic queries are derived from the experiment context, the
+retrieved sources are injected into the prompt for [N]-style citation, and the
+source list is surfaced to the client. The OpenAI Responses API and its
+built-in web_search tool are intentionally not used (not supported by these
+chat.completions endpoints).
 """
 
 import os
 import re
 import json
 import logging
-from typing import List, Dict, Any, Optional, Generator
+from typing import List, Dict, Any, Optional, Generator, Tuple
 
+import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -29,6 +35,8 @@ ENABLE_WEB_SEARCH = os.getenv("ENABLE_WEB_SEARCH", "True").lower() in ("true", "
 # Reasoning models (GLM) spend many tokens on hidden reasoning before the
 # final answer, so allow a generous completion budget.
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "8192"))
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+TAVILY_URL = "https://api.tavily.com/search"
 
 _client = None
 
@@ -40,6 +48,91 @@ def _get_client() -> OpenAI:
     return _client
 
 
+def _build_search_queries(search_bounds: Dict, conditions: Dict, max_queries: int = 3) -> List[str]:
+    """Derive targeted academic search queries from the experiment context."""
+    supports = search_bounds.get("supports", []) or []
+    amine1 = search_bounds.get("amine1", []) or []
+    co2 = conditions.get("co2Concentration", 0.04)
+    temp = conditions.get("temperature", 25)
+    # ~400 ppm (0.04 vol%) or very low → direct air capture; higher → flue gas
+    context = "direct air capture" if co2 <= 0.1 else "post-combustion CO2 capture"
+    amine = amine1[0] if amine1 else "amine"
+
+    queries: List[str] = []
+    for sp in supports[:2]:
+        queries.append(f"{amine} impregnated {sp} sorbent CO2 adsorption capacity {context}")
+    if amine1:
+        queries.append(f"{amine} amine solid sorbent CO2 capture {context} {int(round(temp))}C")
+    if not queries:
+        queries.append(f"amine functionalized solid sorbent CO2 capture {context}")
+
+    seen, out = set(), []
+    for q in queries:
+        if q not in seen:
+            seen.add(q)
+            out.append(q)
+    return out[:max_queries]
+
+
+def _tavily_search(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+    """Run a single Tavily search; returns [{title, url, content}], [] on failure."""
+    if not TAVILY_API_KEY:
+        return []
+    try:
+        resp = requests.post(
+            TAVILY_URL,
+            json={
+                "api_key": TAVILY_API_KEY,
+                "query": query,
+                "max_results": max_results,
+                "search_depth": "basic",
+                "include_answer": False,
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {"title": r.get("title", ""), "url": r.get("url", ""), "content": r.get("content", "")}
+            for r in data.get("results", [])
+            if r.get("url")
+        ]
+    except Exception as e:
+        logger.warning(f"Tavily search failed for '{query}': {e}")
+        return []
+
+
+def _run_web_search(
+    search_bounds: Dict, conditions: Dict, max_queries: int = 3, per_query: int = 3
+) -> Tuple[List[Dict[str, Any]], str]:
+    """Run web searches; return (sources, prompt_block).
+
+    sources: [{index, title, url}] deduplicated by URL across all queries.
+    prompt_block: numbered text block for the prompt (empty when no results).
+    """
+    if not (ENABLE_WEB_SEARCH and TAVILY_API_KEY):
+        return [], ""
+
+    seen_urls = set()
+    sources: List[Dict[str, Any]] = []
+    lines: List[str] = []
+    for q in _build_search_queries(search_bounds, conditions, max_queries):
+        for r in _tavily_search(q, per_query):
+            url = r["url"]
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            idx = len(sources) + 1
+            title = r["title"] or _title_from_url(url)
+            sources.append({"index": idx, "title": title, "url": url})
+            snippet = " ".join((r["content"] or "").split())
+            if len(snippet) > 300:
+                snippet = snippet[:297] + "..."
+            lines.append(f"[{idx}] {title}\n    {snippet}\n    URL: {url}")
+
+    return sources, "\n".join(lines)
+
+
 def _build_prompt(
     experiments: List[Dict],
     search_bounds: Dict,
@@ -47,6 +140,7 @@ def _build_prompt(
     candidates: List[Dict],
     avg_uncertainty: float,
     optimization_info: Optional[Dict] = None,
+    web_results_block: Optional[str] = None,
 ) -> str:
     """Construct the LLM prompt with full experimental context."""
 
@@ -222,15 +316,34 @@ def _build_prompt(
 
     findings_block = "\n".join(findings_lines) if findings_lines else "(insufficient data for analysis)"
 
+    if web_results_block:
+        web_section = (
+            "[Web Search Results] (academic sources retrieved for this query — "
+            "cite these as [1], [2], ... in your reasoning)\n" + web_results_block
+        )
+        step2 = (
+            "STEP 2 — REVIEW the web search results in the [Web Search Results] section below "
+            "(retrieved from academic sources for this experiment's search space and conditions). "
+            "Ground your reasoning in them and cite specific results with [N] markers."
+        )
+    else:
+        web_section = (
+            "[Web Search Results] (none available — rely on the experimental data "
+            "and your own knowledge of the literature)"
+        )
+        step2 = (
+            "STEP 2 — Draw on your knowledge of the relevant academic literature for this "
+            "search space and conditions (no live web results are available for this query)."
+        )
+
     prompt = f"""You are an expert in Direct Air Capture (DAC) CO2 capture materials optimization.
 We are optimizing amine-impregnated solid sorbents for CO2 capture using Bayesian Optimization.
 
 STEP 1 — ANALYZE the experimental settings and data and findings below. Identify key patterns, gaps, and opportunities.
 
-STEP 2 — SEARCH the web for research specifically relevant to the findings and search space, and sources are based on academic websites. Target your searches based on what the experiment shows, not generic topics. For example:
-Search relevant academic articles from current [Search Space] , [Experimental Conditions], [Optimization Configuration], with [Experimental Findings Summary]
+{step2}
 
-STEP 3 — Suggest 5 NOVEL and REASONABLE formulations guided by and experimental findings and search results. 
+STEP 3 — Suggest 5 NOVEL and REASONABLE formulations guided by and experimental findings and search results.
 Particularly at the beginning several iterations at less number of historical experiments, searching results with diverse optimal formulation for different material discovery is quite important.
 
 [Search Space]
@@ -254,6 +367,8 @@ Particularly at the beginning several iterations at less number of historical ex
 
 [Experimental Findings Summary]
 {findings_block}
+
+{web_section}
 
 [Current BO Candidates (avg uncertainty={avg_uncertainty:.4f} mmol/g — LOW, model converging)]
 {cand_block}
@@ -428,7 +543,7 @@ def stream_llm_suggestions(
     optimization_info: Optional[Dict] = None,
 ) -> Generator[str, None, None]:
     """
-    Stream LLM suggestions as SSE events using the Responses API.
+    Stream LLM suggestions as SSE events using the chat.completions API.
 
     Yields SSE-formatted strings:
       - event: search_source  data: {"sources": [...]}  — web search sources
@@ -441,13 +556,21 @@ def stream_llm_suggestions(
         yield _sse("error", {"error": "DASHSCOPE_API_KEY not set in .env"})
         return
 
-    prompt = _build_prompt(experiments, search_bounds, conditions, candidates, avg_uncertainty, optimization_info)
+    # Literature grounding via Tavily (when enabled). Emit sources up-front so the
+    # UI can show them while the model streams its answer.
+    search_sources, web_block = _run_web_search(search_bounds, conditions)
+    if search_sources:
+        yield _sse("search_source", {"sources": search_sources})
+
+    prompt = _build_prompt(
+        experiments, search_bounds, conditions, candidates, avg_uncertainty,
+        optimization_info, web_block,
+    )
 
     try:
         client = _get_client()
 
-        # GpuGeek / GLM: use the OpenAI-compatible chat.completions streaming API.
-        # The Responses API and built-in web_search tool are not supported.
+        # OpenAI-compatible chat.completions streaming API (DashScope/Qwen or GpuGeek/GLM).
         stream = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
@@ -456,7 +579,6 @@ def stream_llm_suggestions(
         )
 
         full_text = ""
-        search_sources = []
 
         for chunk in stream:
             if not getattr(chunk, "choices", None):
@@ -497,7 +619,7 @@ def get_llm_suggestions(
     optimization_info: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """
-    Non-streaming fallback using the Responses API.
+    Non-streaming variant using the chat.completions API.
 
     Returns dict with: suggestions, raw_response, avg_uncertainty, search_sources, error.
     """
@@ -509,14 +631,17 @@ def get_llm_suggestions(
             "error": "DASHSCOPE_API_KEY not set in .env",
         }
 
-    prompt = _build_prompt(experiments, search_bounds, conditions, candidates, avg_uncertainty, optimization_info)
+    # Literature grounding via Tavily (when enabled).
+    search_sources, web_block = _run_web_search(search_bounds, conditions)
+    prompt = _build_prompt(
+        experiments, search_bounds, conditions, candidates, avg_uncertainty,
+        optimization_info, web_block,
+    )
 
     try:
         client = _get_client()
 
-        # GpuGeek / GLM exposes an OpenAI-compatible chat.completions endpoint.
-        # The Responses API and built-in web_search tool are not supported, so
-        # we call chat.completions directly. Web search sources are unavailable.
+        # OpenAI-compatible chat.completions endpoint (DashScope/Qwen or GpuGeek/GLM).
         response = client.chat.completions.create(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
@@ -524,7 +649,6 @@ def get_llm_suggestions(
         )
 
         raw_content = (response.choices[0].message.content or "").strip()
-        search_sources = []
 
         suggestions = _parse_suggestions(raw_content, search_bounds)
 
