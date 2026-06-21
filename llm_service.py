@@ -40,6 +40,16 @@ TAVILY_URL = "https://api.tavily.com/search"
 
 _client = None
 
+# Local RAG retrieval (optional). Import defensively so a missing rag package or
+# dependency never breaks the core LLM service — it just disables RAG.
+try:
+    from rag.rag_service import run_rag_retrieval
+except Exception as _rag_import_err:  # pragma: no cover
+    logger.warning(f"RAG retrieval unavailable: {_rag_import_err}")
+
+    def run_rag_retrieval(search_bounds, conditions):
+        return []
+
 
 def _get_client() -> OpenAI:
     global _client
@@ -104,33 +114,77 @@ def _tavily_search(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
 
 def _run_web_search(
     search_bounds: Dict, conditions: Dict, max_queries: int = 3, per_query: int = 3
-) -> Tuple[List[Dict[str, Any]], str]:
-    """Run web searches; return (sources, prompt_block).
+) -> List[Dict[str, Any]]:
+    """Run web searches; return raw items [{title, url, snippet, kind:'web'}].
 
-    sources: [{index, title, url}] deduplicated by URL across all queries.
-    prompt_block: numbered text block for the prompt (empty when no results).
+    Deduplicated by URL across all queries. Numbering/blocks are assigned later
+    by _assemble_context so RAG and web sources share one [N] sequence.
     """
     if not (ENABLE_WEB_SEARCH and TAVILY_API_KEY):
-        return [], ""
+        return []
 
     seen_urls = set()
-    sources: List[Dict[str, Any]] = []
-    lines: List[str] = []
+    items: List[Dict[str, Any]] = []
     for q in _build_search_queries(search_bounds, conditions, max_queries):
         for r in _tavily_search(q, per_query):
             url = r["url"]
             if url in seen_urls:
                 continue
             seen_urls.add(url)
-            idx = len(sources) + 1
             title = r["title"] or _title_from_url(url)
-            sources.append({"index": idx, "title": title, "url": url})
-            snippet = " ".join((r["content"] or "").split())
-            if len(snippet) > 300:
-                snippet = snippet[:297] + "..."
-            lines.append(f"[{idx}] {title}\n    {snippet}\n    URL: {url}")
+            items.append({
+                "title": title,
+                "url": url,
+                "snippet": " ".join((r["content"] or "").split()),
+                "kind": "web",
+            })
+    return items
 
-    return sources, "\n".join(lines)
+
+def _assemble_context(
+    rag_items: List[Dict[str, Any]], web_items: List[Dict[str, Any]]
+) -> Tuple[List[Dict[str, Any]], str, str]:
+    """Merge RAG + web sources under one continuous [N] numbering.
+
+    Returns (sources, rag_block, web_block):
+      - sources: [{index, title, url, type}] for the search_source SSE event
+      - rag_block / web_block: numbered text for the two prompt sections
+    RAG items keep their own URLs (multiple records may share a DOI); web items
+    are skipped if their URL was already surfaced by RAG or an earlier web item.
+    """
+    sources: List[Dict[str, Any]] = []
+    rag_lines: List[str] = []
+    web_lines: List[str] = []
+    seen_urls = set()
+
+    def _render(item: Dict[str, Any], idx: int) -> str:
+        snippet = " ".join((item.get("snippet") or "").split())
+        if len(snippet) > 300:
+            snippet = snippet[:297] + "..."
+        url = item.get("url", "")
+        ref = f"    来源: {url}" if url else "    来源: 本地知识库"
+        return f"[{idx}] {item.get('title', '')}\n    {snippet}\n{ref}"
+
+    for it in rag_items:
+        idx = len(sources) + 1
+        sources.append({"index": idx, "title": it.get("title", ""),
+                        "url": it.get("url", ""), "type": it.get("kind", "rag")})
+        rag_lines.append(_render(it, idx))
+        if it.get("url"):
+            seen_urls.add(it["url"])
+
+    for it in web_items:
+        url = it.get("url", "")
+        if url and url in seen_urls:
+            continue
+        idx = len(sources) + 1
+        sources.append({"index": idx, "title": it.get("title", ""),
+                        "url": url, "type": "web"})
+        web_lines.append(_render(it, idx))
+        if url:
+            seen_urls.add(url)
+
+    return sources, "\n".join(rag_lines), "\n".join(web_lines)
 
 
 def _build_prompt(
@@ -140,6 +194,7 @@ def _build_prompt(
     candidates: List[Dict],
     avg_uncertainty: float,
     optimization_info: Optional[Dict] = None,
+    rag_results_block: Optional[str] = None,
     web_results_block: Optional[str] = None,
 ) -> str:
     """Construct the LLM prompt with full experimental context."""
@@ -316,24 +371,33 @@ def _build_prompt(
 
     findings_block = "\n".join(findings_lines) if findings_lines else "(insufficient data for analysis)"
 
-    if web_results_block:
-        web_section = (
-            "[Web Search Results] (academic sources retrieved for this query — "
-            "cite these as [1], [2], ... in your reasoning)\n" + web_results_block
-        )
-        step2 = (
-            "STEP 2 — REVIEW the web search results in the [Web Search Results] section below "
-            "(retrieved from academic sources for this experiment's search space and conditions). "
-            "Ground your reasoning in them and cite specific results with [N] markers."
+    if rag_results_block:
+        rag_section = (
+            "[Local Knowledge Base] (curated DAC literature + historical experiment "
+            "records — authoritative, prioritize these; cite as [N])\n" + rag_results_block
         )
     else:
+        rag_section = "[Local Knowledge Base] (no relevant local records retrieved)"
+
+    if web_results_block:
         web_section = (
-            "[Web Search Results] (none available — rely on the experimental data "
-            "and your own knowledge of the literature)"
+            "[Web Search Results] (live web search — cite as [N])\n" + web_results_block
         )
+    else:
+        web_section = "[Web Search Results] (none available)"
+
+    evidence_section = rag_section + "\n\n" + web_section
+
+    if rag_results_block or web_results_block:
+        step2 = (
+            "STEP 2 — REVIEW the evidence in [Local Knowledge Base] (curated/authoritative — "
+            "prioritize) and [Web Search Results] below. Ground your reasoning in these sources "
+            "and cite specific items with [N] markers."
+        )
+    else:
         step2 = (
             "STEP 2 — Draw on your knowledge of the relevant academic literature for this "
-            "search space and conditions (no live web results are available for this query)."
+            "search space and conditions (no retrieved evidence is available for this query)."
         )
 
     prompt = f"""You are an expert in Direct Air Capture (DAC) CO2 capture materials optimization.
@@ -368,7 +432,7 @@ Particularly at the beginning several iterations at less number of historical ex
 [Experimental Findings Summary]
 {findings_block}
 
-{web_section}
+{evidence_section}
 
 [Current BO Candidates (avg uncertainty={avg_uncertainty:.4f} mmol/g — LOW, model converging)]
 {cand_block}
@@ -556,15 +620,17 @@ def stream_llm_suggestions(
         yield _sse("error", {"error": "DASHSCOPE_API_KEY not set in .env"})
         return
 
-    # Literature grounding via Tavily (when enabled). Emit sources up-front so the
-    # UI can show them while the model streams its answer.
-    search_sources, web_block = _run_web_search(search_bounds, conditions)
+    # Evidence grounding: local RAG knowledge base + live Tavily web search.
+    # Emit merged sources up-front so the UI can show them while the model streams.
+    rag_items = run_rag_retrieval(search_bounds, conditions)
+    web_items = _run_web_search(search_bounds, conditions)
+    search_sources, rag_block, web_block = _assemble_context(rag_items, web_items)
     if search_sources:
         yield _sse("search_source", {"sources": search_sources})
 
     prompt = _build_prompt(
         experiments, search_bounds, conditions, candidates, avg_uncertainty,
-        optimization_info, web_block,
+        optimization_info, rag_results_block=rag_block, web_results_block=web_block,
     )
 
     try:
@@ -631,11 +697,13 @@ def get_llm_suggestions(
             "error": "DASHSCOPE_API_KEY not set in .env",
         }
 
-    # Literature grounding via Tavily (when enabled).
-    search_sources, web_block = _run_web_search(search_bounds, conditions)
+    # Evidence grounding: local RAG knowledge base + live Tavily web search.
+    rag_items = run_rag_retrieval(search_bounds, conditions)
+    web_items = _run_web_search(search_bounds, conditions)
+    search_sources, rag_block, web_block = _assemble_context(rag_items, web_items)
     prompt = _build_prompt(
         experiments, search_bounds, conditions, candidates, avg_uncertainty,
-        optimization_info, web_block,
+        optimization_info, rag_results_block=rag_block, web_results_block=web_block,
     )
 
     try:

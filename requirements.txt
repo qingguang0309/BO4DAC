@@ -10,3 +10,10 @@ flask-cors~=6.0.2
 requests~=2.32.5
 botorch~=0.16.1
 dashscope>=1.20.0
+openai>=1.40.0
+python-dotenv>=1.0.0
+
+# RAG (local knowledge base)
+chromadb>=0.5.0
+sentence-transformers>=3.0.0
+PyMuPDF>=1.24.0
