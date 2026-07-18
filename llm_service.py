@@ -16,7 +16,9 @@ chat.completions endpoints).
 import os
 import re
 import json
+import time
 import logging
+import threading
 from typing import List, Dict, Any, Optional, Generator, Tuple
 
 import requests
@@ -37,18 +39,26 @@ ENABLE_WEB_SEARCH = os.getenv("ENABLE_WEB_SEARCH", "True").lower() in ("true", "
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "8192"))
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 TAVILY_URL = "https://api.tavily.com/search"
+# Persistent web-search cache: identical queries across BO iterations hit the
+# cache instead of re-calling Tavily (data/ is gitignored).
+WEB_CACHE_PATH = os.getenv("WEB_CACHE_PATH", "data/web_search_cache.json")
+WEB_CACHE_TTL_DAYS = float(os.getenv("WEB_CACHE_TTL_DAYS", "7"))
 
 _client = None
+_web_cache_lock = threading.Lock()
 
 # Local RAG retrieval (optional). Import defensively so a missing rag package or
 # dependency never breaks the core LLM service — it just disables RAG.
 try:
-    from rag.rag_service import run_rag_retrieval
+    from rag.rag_service import run_rag_retrieval, get_local_paper_dois
 except Exception as _rag_import_err:  # pragma: no cover
     logger.warning(f"RAG retrieval unavailable: {_rag_import_err}")
 
     def run_rag_retrieval(search_bounds, conditions):
         return []
+
+    def get_local_paper_dois():
+        return set()
 
 
 def _get_client() -> OpenAI:
@@ -84,10 +94,11 @@ def _build_search_queries(search_bounds: Dict, conditions: Dict, max_queries: in
     return out[:max_queries]
 
 
-def _tavily_search(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
-    """Run a single Tavily search; returns [{title, url, content}], [] on failure."""
+def _tavily_search(query: str, max_results: int = 3) -> Optional[List[Dict[str, Any]]]:
+    """Run a single Tavily search; returns [{title, url, content}], None on failure
+    (so failures are never written to the cache)."""
     if not TAVILY_API_KEY:
-        return []
+        return None
     try:
         resp = requests.post(
             TAVILY_URL,
@@ -109,7 +120,49 @@ def _tavily_search(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
         ]
     except Exception as e:
         logger.warning(f"Tavily search failed for '{query}': {e}")
-        return []
+        return None
+
+
+def _load_web_cache() -> Dict[str, Any]:
+    try:
+        with open(WEB_CACHE_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_web_cache(cache: Dict[str, Any]) -> None:
+    try:
+        os.makedirs(os.path.dirname(WEB_CACHE_PATH) or ".", exist_ok=True)
+        tmp = WEB_CACHE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, WEB_CACHE_PATH)
+    except Exception as e:
+        logger.warning(f"Saving web-search cache failed: {e}")
+
+
+def _cached_tavily_search(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+    """Tavily search behind a persistent per-query cache with TTL."""
+    ttl = WEB_CACHE_TTL_DAYS * 86400
+    now = time.time()
+    with _web_cache_lock:
+        entry = _load_web_cache().get(query)
+    if entry and (now - entry.get("ts", 0)) < ttl:
+        logger.info(f"web-search cache hit: '{query}'")
+        return entry.get("results", [])
+
+    results = _tavily_search(query, max_results)
+    if results is None:  # search failed — keep whatever cache we had, write nothing
+        return (entry or {}).get("results", [])
+
+    with _web_cache_lock:
+        cache = _load_web_cache()
+        cache[query] = {"ts": now, "results": results}
+        # prune expired entries so the file stays small
+        cache = {q: e for q, e in cache.items() if (now - e.get("ts", 0)) < ttl}
+        _save_web_cache(cache)
+    return results
 
 
 def _run_web_search(
@@ -126,7 +179,7 @@ def _run_web_search(
     seen_urls = set()
     items: List[Dict[str, Any]] = []
     for q in _build_search_queries(search_bounds, conditions, max_queries):
-        for r in _tavily_search(q, per_query):
+        for r in _cached_tavily_search(q, per_query):
             url = r["url"]
             if url in seen_urls:
                 continue
@@ -138,6 +191,21 @@ def _run_web_search(
                 "snippet": " ".join((r["content"] or "").split()),
                 "kind": "web",
             })
+
+    # Local-first: drop web results for papers we already hold in full text in
+    # the local knowledge base (matched by DOI substring in the URL).
+    local_dois = get_local_paper_dois()
+    if local_dois and items:
+        kept = []
+        for it in items:
+            url_l = (it.get("url") or "").lower()
+            if any(doi in url_l for doi in local_dois):
+                continue
+            kept.append(it)
+        if len(kept) < len(items):
+            logger.info(f"web search: dropped {len(items) - len(kept)} result(s) "
+                        f"already covered by local knowledge base")
+        items = kept
     return items
 
 

@@ -2,12 +2,18 @@
 Offline ingestion for the BO4DAC RAG knowledge base.
 
 Builds two Chroma collections from local sources:
-  - papers       : chunked academic PDFs in data/papers/
+  - papers       : chunked academic papers, from two source types:
+                     (a) MinerU-parsed folders  <parsed-dir>/NNN.pdf-id/full.md   (preferred)
+                     (b) raw PDFs in data/papers/                                  (fallback)
   - experiments  : one "experiment card" per row of historical_experiments.csv
+
+Paper DOIs are resolved from the CSV's Source_File column (e.g.
+"001.pdf-id_comprehensive_extraction.json" -> folder "001.pdf-id"), with a
+regex scan of the paper text as fallback.
 
 Usage:
   python -m rag.ingest                                  # default paths
-  python -m rag.ingest --pdf-dir data/papers --csv data/historical_experiments.csv
+  python -m rag.ingest --parsed-dir "Solid Sorbent Papers"
   python -m rag.ingest --reset                          # rebuild from scratch
 
 First run downloads the bge-m3 embedding model (~2GB).
@@ -31,10 +37,144 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("rag.ingest")
 
 DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+")
+MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+# 无检索价值的章节（作者信息、致谢、参考文献列表等）
+SKIP_SECTION_RE = re.compile(
+    r"AUTHOR INFORMATION|Corresponding Author|ORCID|^Notes$|ACKNOWLEDG|REFERENCES"
+    r"|ASSOCIATED CONTENT|Supporting Information|Data availability|Declaration"
+    r"|Conflict|CRediT",
+    re.IGNORECASE,
+)
 
 
 # ----------------------------------------------------------------------
-# PDF papers
+# MinerU-parsed papers (<parsed-dir>/NNN.pdf-id/full.md)
+# ----------------------------------------------------------------------
+def _clean_latex(s: str) -> str:
+    """Flatten the light LaTeX markup MinerU leaves in full.md into plain text."""
+    s = re.sub(r"\$([^$]*)\$", r"\1", s)
+    s = s.replace(r"\cdot", "·").replace(r"\%", "%")
+    s = re.sub(r"\\(?:mathrm|mathbf|mathit|text|textit|operatorname)\s*\{([^{}]*)\}", r"\1", s)
+    s = re.sub(r"[_^]\{([^{}]*)\}", r"\1", s)
+    s = re.sub(r"[_^](\w)", r"\1", s)
+    s = re.sub(r"\\[a-zA-Z]+", " ", s)
+    s = s.replace("{", "").replace("}", "")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _table_to_text(html: str) -> str:
+    """Convert a MinerU single-line HTML table into ' | '-separated text rows."""
+    t = re.sub(r"</t[dh]>\s*<t[dh][^>]*>", " | ", html)
+    t = re.sub(r"</tr>\s*<tr[^>]*>", "\n", t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    return t.strip()
+
+
+def _split_sections(md_text: str) -> List[tuple]:
+    """Split markdown into (heading, body) pairs on level-1 headings."""
+    sections, cur_head, cur = [], "", []
+    for ln in md_text.split("\n"):
+        if ln.startswith("# "):
+            if cur_head or any(x.strip() for x in cur):
+                sections.append((cur_head, "\n".join(cur)))
+            cur_head, cur = ln[2:].strip(), []
+        else:
+            cur.append(ln)
+    if cur_head or any(x.strip() for x in cur):
+        sections.append((cur_head, "\n".join(cur)))
+    return sections
+
+
+def _load_doi_map(csv_path: str) -> Dict[str, str]:
+    """Map paper folder id ('001.pdf-id') -> DOI, from the CSV's Source_File column."""
+    m: Dict[str, str] = {}
+    if not os.path.isfile(csv_path):
+        return m
+    try:
+        df = pd.read_csv(csv_path, usecols=["Source_File", "DOI"])
+    except Exception as e:
+        logger.warning(f"DOI map unavailable ({e})")
+        return m
+    for _, r in df.dropna(subset=["Source_File"]).drop_duplicates().iterrows():
+        pid = str(r["Source_File"]).split("_comprehensive")[0].strip()
+        doi = str(r["DOI"]).strip() if pd.notna(r["DOI"]) else ""
+        if pid and doi and doi != "-" and pid not in m:
+            m[pid] = doi
+    return m
+
+
+def parse_mineru_papers(parsed_dir: str, doi_map: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Chunk MinerU-parsed papers (full.md) into embeddable items with metadata."""
+    items: List[Dict[str, Any]] = []
+    if not os.path.isdir(parsed_dir):
+        logger.info(f"Parsed-papers dir not found: {parsed_dir} (skipping)")
+        return items
+    dirs = sorted(glob.glob(os.path.join(parsed_dir, "*.pdf-id")))
+    if not dirs:
+        logger.info(f"No *.pdf-id folders in {parsed_dir} (skipping)")
+        return items
+
+    for d in dirs:
+        paper_id = os.path.basename(d)
+        md_path = os.path.join(d, "full.md")
+        if not os.path.isfile(md_path):
+            logger.warning(f"  {paper_id}: no full.md — skipped")
+            continue
+        with open(md_path, encoding="utf-8") as f:
+            raw = f.read()
+
+        raw = re.sub(r"<table>.*?</table>", lambda mt: _table_to_text(mt.group(0)),
+                     raw, flags=re.S)
+        raw = MD_IMAGE_RE.sub(" ", raw)
+
+        sections = _split_sections(raw)
+        # 论文标题 = 第一个"像标题"的 heading（跳过预置噪声行和编号章节名）
+        title, title_idx = paper_id, -1
+        for si, (heading, _) in enumerate(sections):
+            h = _clean_latex(heading)
+            if h and not re.match(r"^\d", h) and not SKIP_SECTION_RE.search(h) \
+                    and h.upper() not in ("ABSTRACT", "INTRODUCTION"):
+                title, title_idx = h, si
+                break
+        doi = doi_map.get(paper_id, "")
+        if not doi:
+            mdoi = DOI_RE.search(raw)
+            doi = mdoi.group(0).rstrip(".)") if mdoi else ""
+
+        n_before = len(items)
+        chunk_idx = 0
+        for si, (heading, body) in enumerate(sections):
+            sec_name = _clean_latex(heading) if heading else ""
+            if si <= title_idx:
+                sec_name = "Title & Abstract"
+            elif sec_name and SKIP_SECTION_RE.search(sec_name):
+                continue
+            text = _clean_latex(body)
+            if len(text.split()) < 15:
+                continue
+            for chunk in _chunk_words(text):
+                # 每个 chunk 自带论文标题+章节上下文，提升独立检索质量
+                doc = f"[文献] {title} — {sec_name or 'body'}: {chunk}"
+                meta = {
+                    "doc_type": "paper_chunk",
+                    "source": "parsed_md",
+                    "paper_id": paper_id,
+                    "source_file": paper_id,
+                    "title": title,
+                    "section": sec_name or "body",
+                    "chunk_index": chunk_idx,
+                }
+                if doi:
+                    meta["doi"] = doi
+                items.append({"id": f"{paper_id}::c{chunk_idx}", "text": doc, "metadata": meta})
+                chunk_idx += 1
+        logger.info(f"  {paper_id}: {len(items) - n_before} chunks "
+                    f"(doi={doi or 'n/a'}) — {title[:60]}")
+    return items
+
+
+# ----------------------------------------------------------------------
+# Raw PDF papers (fallback path)
 # ----------------------------------------------------------------------
 def _chunk_words(text: str, size: int = 450, overlap: int = 80) -> List[str]:
     words = text.split()
@@ -210,6 +350,8 @@ def _store(items: List[Dict[str, Any]], coll_name: str, batch: int = 128) -> int
 
 def main():
     ap = argparse.ArgumentParser(description="Build the BO4DAC RAG knowledge base.")
+    ap.add_argument("--parsed-dir", default="Solid Sorbent Papers",
+                    help="dir of MinerU-parsed papers (NNN.pdf-id/full.md)")
     ap.add_argument("--pdf-dir", default="data/papers")
     ap.add_argument("--csv", default="data/historical_experiments.csv")
     ap.add_argument("--db-path", default=store.RAG_DB_PATH)
@@ -225,8 +367,10 @@ def main():
             except Exception:
                 pass
 
-    logger.info("Parsing PDFs ...")
-    papers = parse_pdfs(args.pdf_dir)
+    logger.info("Parsing MinerU-parsed papers ...")
+    papers = parse_mineru_papers(args.parsed_dir, _load_doi_map(args.csv))
+    logger.info("Parsing raw PDFs ...")
+    papers += parse_pdfs(args.pdf_dir)
     logger.info("Building experiment cards ...")
     experiments = build_experiment_cards(args.csv)
 

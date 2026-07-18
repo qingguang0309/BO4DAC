@@ -23,6 +23,9 @@ encoders/
 *.db
 *.sqlite
 
+# Copyrighted parsed papers (local RAG corpus, never commit)
+Solid Sorbent Papers/
+
 # Temp files
 temp.txt
 *.tmp
